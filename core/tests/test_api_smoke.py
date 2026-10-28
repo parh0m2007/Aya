@@ -46,7 +46,9 @@ def test_api_smoke(client):
     # diag endpoint writes + rotates
     r = client.post("/api/_diag", json={"tag": "pytest-note"})
     assert r.json()["ok"] is True
-    assert os.path.exists("logs/tts-diag.log")
+    from core import paths
+
+    assert (paths.logs_dir() / "tts-diag.log").exists()  # логи — в ~/.aya/logs
 
 
 def test_stream_error_answer(client, monkeypatch):

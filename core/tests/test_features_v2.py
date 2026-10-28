@@ -208,6 +208,7 @@ def test_memory_search_stem_fallback(monkeypatch, db_reset):
     from core import longmem
 
     monkeypatch.setattr(longmem, "_ollama_embed", lambda text: None)
+    longmem._BG.submit(lambda: None).result(timeout=30)  # дождаться фоновой записи от прошлых тестов
     db.execute("DELETE FROM memories")
     mid = db.add_message("assistant", "Жил-был серый кот, который любил спать на клавиатуре и мурлыкать.")
     longmem.ingest("assistant", "Жил-был серый кот, который любил спать на клавиатуре и мурлыкать.", mid)
