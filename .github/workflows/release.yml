@@ -1,0 +1,56 @@
+name: release
+
+# Тег vX.Y.Z → сборка установщика и черновик релиза на GitHub.
+# Опубликовать черновик автор нажимает сам.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: astral-sh/setup-uv@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Зависимости окна
+        run: npm ci
+
+      - name: Свой Python и ядро для установщика
+        shell: pwsh
+        run: ./scripts/build-runtime.ps1
+
+      - name: Сборка установщика и черновик релиза
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Aya ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          releaseBody: |
+            ## Как установить
+            1. Скачай **Aya_*_x64-setup.exe** ниже и запусти.
+            2. Если Windows пишет «Windows защитила ваш компьютер» — нажми **Подробнее → Выполнить в любом случае**. Это обычное предупреждение для программ без платной подписи.
+            3. После установки откроется настройка: вставь ключ ollama.com (и, по желанию, ключ fish.audio) — Ая подскажет, где их взять.
+
+            Уже стоит Ая? Она сама предложит обновиться.

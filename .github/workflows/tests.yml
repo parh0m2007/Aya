@@ -1,0 +1,49 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Окно — типы и тесты
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npx vitest run
+
+      - name: Ядро — тесты (базовый набор, как в установщике)
+        shell: pwsh
+        run: |
+          uv venv .venv-ci --python 3.11
+          uv pip install --python .venv-ci/Scripts/python.exe -r core/requirements.txt pytest
+          .venv-ci/Scripts/python.exe -X utf8 -m pytest core/tests -q
+
+      - name: Rust — тесты
+        shell: pwsh
+        run: |
+          npx vite build
+          # tauri.conf.json кладёт в установщик runtime/python и stage/core (их собирает
+          # scripts/build-runtime.ps1); для тестов хватает пустых папок
+          New-Item -ItemType Directory -Force src-tauri/runtime/python, src-tauri/stage/core | Out-Null
+          cargo test --manifest-path src-tauri/Cargo.toml

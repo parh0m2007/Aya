@@ -1,0 +1,4 @@
+# Ускорение распознавания речи на видеокарте NVIDIA (ctranslate2 4.x: CUDA 12 + cuDNN 9).
+# Ставится по кнопке в ~/.aya/runtime/gpu, без torch.
+nvidia-cublas-cu12==12.6.*
+nvidia-cudnn-cu12==9.*

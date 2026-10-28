@@ -1,0 +1,25 @@
+node_modules/
+dist/
+core/.venv/
+core/__pycache__/
+src-tauri/target/
+src-tauri/gen/
+core/.venv
+*.db
+__pycache__/
+*.pyc
+logs/
+core/voice/qwen/
+core/voice/f5_ru/bg_cache/
+
+__pycache__/
+.superpowers/
+src-tauri/runtime/
+src-tauri/stage/
+# веса моделей — качаются по кнопке с Hugging Face
+*.safetensors
+*.pth
+# голос автора не публикуется
+core/voice/f5_ru/refs_user/
+public/models/micu/
+scripts/private-words.txt

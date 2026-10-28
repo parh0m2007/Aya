@@ -1,0 +1,35 @@
+# Базовый набор: входит в установщик (свой Python рядом с aya.exe).
+# Тяжёлое — отдельные наборы, ставятся по кнопке в ~/.aya/runtime:
+#   requirements-gpu.txt           — ускорение распознавания на видеокарте NVIDIA
+#   requirements-local-voices.txt  — локальные голоса F5 / VITS2 / Qwen (torch)
+fastapi==0.143.3
+uvicorn[standard]==0.54.0
+httpx==0.28.1
+pydantic==2.14.1
+discord.py==2.7.1
+Telethon==1.45.0
+pypdf==6.21.2
+python-multipart==0.0.32
+psutil==7.2.2
+pillow==12.3.0
+numpy==2.4.6
+soundfile==0.14.0
+# голос: облачный Fish через httpx, запасной — Edge
+edge-tts==7.3.1
+# распознавание речи (модель Whisper качается при первой настройке)
+faster-whisper==1.2.1
+ctranslate2==4.8.3
+huggingface_hub==0.36.2
+# текст с экрана
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.31.0
+# музыка: YouTube-поиск, Яндекс Музыка, плеер и громкость Windows
+yt-dlp==2026.10.21
+yandex-music==3.2.2
+winrt-runtime==4.0.3; sys_platform == "win32"
+winrt-Windows.Media.Control==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Foundation==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Storage.Streams==4!10.0.28000.2705; sys_platform == "win32"
+pycaw==20260927; sys_platform == "win32"
+comtypes==1.4.17; sys_platform == "win32"

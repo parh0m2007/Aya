@@ -1,0 +1,19 @@
+# Локальные голоса F5 / VITS2 / Qwen. Ставится по кнопке в ~/.aya/runtime/local_voices.
+# Веса моделей качаются отдельно с Hugging Face (core/runtime.py).
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.14.1+cu126
+torchaudio==2.11.0
+f5-tts==1.1.22
+qwen-tts==0.1.1
+transformers==4.57.3
+accelerate==1.12.0
+librosa==0.11.0
+scipy==1.17.1
+ema-pytorch==0.8.3
+x-transformers==2.31.8
+torchdiffeq==0.2.5
+einops==0.8.2
+vocos==0.1.0
+ruaccent==1.5.8.3
+Unidecode==1.4.0
+pypinyin==0.55.0

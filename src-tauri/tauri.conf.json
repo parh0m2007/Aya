@@ -1,0 +1,79 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Aya",
+  "version": "1.0.0",
+  "identifier": "dev.aya.companion",
+  "build": {
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Aya",
+        "width": 420,
+        "height": 780,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "shadow": false,
+        "create": false,
+        "additionalBrowserArgs": "--autoplay-policy=no-user-gesture-required"
+      },
+      {
+        "label": "console",
+        "title": "Aya Console",
+        "url": "console.html",
+        "width": 920,
+        "height": 660,
+        "decorations": true,
+        "resizable": true,
+        "create": false,
+        "additionalBrowserArgs": "--remote-debugging-port=9225"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "runtime/python/": "python/",
+      "stage/core/": "core/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Russian",
+          "English"
+        ],
+        "displayLanguageSelector": false
+      }
+    },
+    "shortDescription": "Ая — живой помощник на рабочем столе",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/parh0m2007/Aya/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2NTk5Qjc5ODU4MjYyNjYKUldSbVlvS0ZlWnRadGhtRVFLT1VLT3I3UmpnTEdoWkNnL1hTaUFES0xlVHpuZURqQ2EreDBiMUgK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
