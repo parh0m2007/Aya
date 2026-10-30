@@ -7,7 +7,7 @@ import core.voice.stt as stt
 
 
 class FakeModel:
-    def __init__(self, size, device, compute_type):
+    def __init__(self, size, device, compute_type, cpu_threads=0):
         self.device = device
         FakeModel.made.append(device)
 

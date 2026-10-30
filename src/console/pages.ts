@@ -479,6 +479,32 @@ export async function brainPage(root: HTMLElement): Promise<Refresher> {
   );
 }
 
+/* ═════════════ Игровой режим ═════════════ */
+
+async function gameCard(): Promise<HTMLElement> {
+  const ui = await fetchJson<{ game?: { on: boolean; app?: string; enabled?: boolean } }>("/api/ui").catch(() => ({}) as { game?: undefined });
+  const g = ui.game ?? { on: false, enabled: true };
+  const card = el("div", "card");
+  card.append(el("h3", "sec-title", "Игровой режим"));
+  const li = el("div", "set-item");
+  const t = el("span", "grow");
+  t.innerHTML =
+    "Экономить ресурсы в играх" +
+    `<small class="dim block">Пока на весь экран открыта игра (Valorant, CS2, Dota 2 и любая другая), Ая уходит под игру, ` +
+    `не рисуется и не слушает «Ая, …», распознаёт речь лёгкой моделью на 2 ядрах, говорит облачным голосом и уступает процессор игре. ` +
+    `Говорить с ней можно по клавише — ответит голосом.</small>` +
+    (g.on ? `<small class="ok block">Сейчас: игра ${esc(g.app || "")}</small>` : "");
+  li.append(
+    t,
+    switchEl(g.enabled !== false, async (v) => {
+      await postJson("/api/config", { game_mode: v });
+      toast(v ? "Игровой режим включён" : "Игровой режим выключен — в играх Ая работает как обычно");
+    }),
+  );
+  card.append(li);
+  return card;
+}
+
 /* ═════════════ Система ═════════════ */
 
 export async function systemPage(root: HTMLElement): Promise<Refresher> {
@@ -491,7 +517,7 @@ export async function systemPage(root: HTMLElement): Promise<Refresher> {
       location.hash = "setup";
     }),
   );
-  root.append(again);
+  root.append(again, await gameCard());
   const metrics = el("div", "card-grid two");
   const audit = el("div", "card");
   const fill = async () => {

@@ -438,7 +438,7 @@ def warm() -> None:
     загрузит по требованию. Для локального голоса греем только его движок,
     чтобы не держать в памяти лишние гигабайты.
     """
-    sel = db.setting("tts_voice_id", DEFAULT_VOICE)
+    sel = selected_voice()
     with _lock:
         if sel in FISH_VOICES:
             pass
@@ -712,8 +712,26 @@ def fish_latency() -> str:
     return v if v in FISH_LATENCIES else "balanced"
 
 
+def _in_game() -> bool:
+    try:
+        from .. import gamemode
+
+        return gamemode.active()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def selected_voice() -> str:
+    """Выбранный голос. В игре локальные (F5, Qwen, VITS) не грузим — они
+    занимают 1,5–4 ГБ видеопамяти и нагружают её на каждой фразе."""
+    vid = db.setting("tts_voice_id", DEFAULT_VOICE)
+    if vid not in FISH_VOICES and _in_game():
+        return DEFAULT_VOICE
+    return vid
+
+
 def is_cloud(vid: str = "") -> bool:
-    return (vid or db.setting("tts_voice_id", DEFAULT_VOICE)) in FISH_VOICES
+    return (vid or selected_voice()) in FISH_VOICES
 
 
 def fish_ready() -> bool:
@@ -859,6 +877,8 @@ async def _cloud_fallback(text: str) -> tuple[str, int] | None:
             return p[0], 0
     except Exception:  # noqa: BLE001
         traceback.print_exc()
+    if _in_game():
+        return None  # в игре локальный голос не грузим — лучше промолчать, чем подлагивать
     return await _qwen_speak(text, "qwen_17")
 
 
@@ -871,7 +891,7 @@ async def speak_live(text: str, mood: str = "calm", vid_override: str = ""):
 
     from .live_audio import LiveAudio
 
-    vid = vid_override or db.setting("tts_voice_id", DEFAULT_VOICE)
+    vid = vid_override or selected_voice()
     if vid not in FISH_VOICES:
         return None
     text = textnorm.speakable(text.strip()[:600])[:600]
@@ -924,7 +944,8 @@ async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: boo
     import time as _time
 
     t0 = _time.perf_counter()
-    vid = vid_override or db.setting("tts_voice_id", DEFAULT_VOICE)
+    vid = vid_override or selected_voice()
+    game = _in_game()
     # быстрый путь: та же фраза тем же голосом уже озвучена — отдаём файл,
     # не загружая ни TTS, ни ударения (раньше кэш проверялся после загрузки движка)
     key = _index_key(vid, mood, text)
@@ -944,7 +965,9 @@ async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: boo
         r = await _fish_speak(text, vid)
         if r is None:
             r = await _cloud_fallback(text)
-    if r is None and is_f5_ref(vid):
+    if r is None and game:
+        pass  # в игре — только облако и Edge, локальные движки ниже не трогаем
+    elif r is None and is_f5_ref(vid):
         r = await _f5_real(text, vid, mood, nfe)
         if r is None:
             r = await _f5_speak(text, mood, nfe)
@@ -954,9 +977,9 @@ async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: boo
         r = await _qwen_speak(text, vid)
     elif r is None and vid in VITS_VOICES:
         r = await _vits_speak(text, mood, VITS_VOICES[vid])
-    if r is None and not is_f5_ref(vid):
+    if r is None and not game and not is_f5_ref(vid):
         r = await _f5_real(text, "f3", mood, nfe)
-    if r is None:
+    if r is None and not game:
         r = await _vits_speak(text, mood, 1)
     if r is None:
         import asyncio

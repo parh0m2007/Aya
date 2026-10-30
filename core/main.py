@@ -26,7 +26,7 @@ from core import agents, bridge_telegram, bridge_discord, bridge_tguser
 from core import longmem
 from core import persona
 from core import attach, diary, desktop, music, pomodoro
-from core import runtime, setup
+from core import gamemode, runtime, setup
 
 runtime.activate()  # докачанные наборы (видеокарта, локальные голоса) — до импорта голоса
 from core.voice import speech_plan
@@ -56,8 +56,10 @@ async def _lifespan(_: FastAPI):
         proactive.start()
         diary.start()
         music.worker.WORKER.submit(music.system.recover_duck)  # прошлый раз закрылись посреди речи
+        gamemode.start()
     yield
     if not os.environ.get("AYA_DISABLE_TASKS"):
+        gamemode.stop()
         with contextlib.suppress(Exception):
             music.in_worker(music.system.release_duck, timeout=3)
         if mcp_boot is not None:
@@ -676,6 +678,8 @@ def _init_prompt(topic: str, tg_items: list[dict] | None = None) -> str:
 
 @app.get("/api/initiative")
 async def initiative():
+    if gamemode.active():  # в игре сама не заговаривает (и маркеры отложенных писем не трогаем)
+        return {"topic": "", "reply": "", **state.snapshot()}
     topic = state.initiative_check()
     out = {"topic": "", "reply": "", **state.snapshot()}
     if not topic:
@@ -1235,6 +1239,7 @@ class VoiceIn(BaseModel):
     followup_sec: int | None = None
     hotkey_talk: str | None = None
     hotkey_toggle: str | None = None
+    game_mode: bool | None = None
 
 
 HOTKEY_DEFAULTS = {"hotkey_talk": "Control+Space", "hotkey_toggle": "Alt+Shift+A"}
@@ -1272,6 +1277,7 @@ async def get_config():
         "tts_fast_first": db.setting("tts_fast_first", "1") != "0",
         "fish_latency": tts.fish_latency(),
         "fish_key_set": bool(db.setting("fish_api_key", "").strip()),  # сам ключ наружу не отдаём
+        "game_mode": gamemode.enabled(),
     }
 
 
@@ -1299,7 +1305,7 @@ async def set_config(body: VoiceIn):
         db.set_setting("voice_followup", "1" if body.followup else "0")
     if body.followup_sec is not None:
         db.set_setting("voice_followup_sec", str(max(2, min(30, body.followup_sec))))
-    for key in ("wake_word", "avatar_walk", "diary_enabled", "tts_fast_first"):
+    for key in ("wake_word", "avatar_walk", "diary_enabled", "tts_fast_first", "game_mode"):
         val = getattr(body, key)
         if val is not None:
             db.set_setting(key, "1" if val else "0")
@@ -1338,6 +1344,7 @@ async def ui_state():
         "pending": len(gateway.PENDING),
         "pomodoro": pomodoro.status(),
         "music": music.player.snapshot(),
+        "game": gamemode.status(),  # окно прячется и не слушает «Ая, …», пока идёт игра
     }
 
 

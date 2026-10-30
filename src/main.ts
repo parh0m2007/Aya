@@ -26,6 +26,7 @@ import { initVoice, currentVoiceMode, applyVoiceModeValue, hotkeyAction, HoldGat
 import { accelLabel, rebind } from "./hotkey";
 import { startUpdateChecks } from "./updater";
 import { dropWhenHidden, Endpointer, matchWake, speechLevel, wakeNames } from "./voice-logic";
+import { gameVoiceMode, listensAlways, rendersNow } from "./game-mode";
 import { clampFollowupSec, FollowUpWindow, shouldArmFollowUp } from "./followup";
 import { shouldToast, toastBody } from "./notify-decision";
 import { notifyAya } from "./notify";
@@ -600,6 +601,9 @@ let micCtx: AudioContext | null = null;
 let vadTimer: ReturnType<typeof setInterval> | null = null;
 const ep = new Endpointer();
 const holdGate = new HoldGate(); // гейт «нажал-держим»: отменяет старт записи, если уже отпустили
+
+// идёт полноэкранная игра (флаг из ядра): только клавиша, без отрисовки
+let gameOn = false;
 
 // «Ая, …»
 let wakeOn = false;
@@ -1177,9 +1181,32 @@ function vadTick() {
   startRec(origin).catch(() => {});
 }
 
-/** Микрофон слушает постоянно в режиме «по голосу» и при «Ая, …». */
+/** Микрофон слушает постоянно в режиме «по голосу» и при «Ая, …» — но не в игре. */
 function needsListening(): boolean {
-  return voiceMode === "auto" || wakeOn;
+  return listensAlways(voiceMode, wakeOn, gameOn);
+}
+
+/* ═════════════════════════ игровой режим ═════════════════════════ */
+
+/** Ядро заметило полноэкранную игру (или она закончилась). */
+async function applyGame(game: { on?: boolean } | undefined) {
+  const on = !!game?.on;
+  if (on === gameOn) return;
+  gameOn = on;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    // не «поверх всех»: игра закрывает Аю, и Windows выводит кадры игры напрямую (без рывков);
+    // после игры Ая снова сверху — без перехвата фокуса у той программы, где ты сейчас
+    await getCurrentWindow().setAlwaysOnTop(!on);
+  } catch {}
+  if (on && followupTimer != null) cancelFollowup(true);
+  await applyVoiceMode(); // в игре — только клавиша, микрофон отпускаем
+  await syncRender();
+}
+
+/** Рисовать аватар, только когда окно видно и игры нет. */
+async function syncRender() {
+  setHidden(!rendersNow(gameOn, await isAyaHidden()));
 }
 
 async function applyVoiceMode() {
@@ -1201,8 +1228,9 @@ async function applyVoiceMode() {
     liveStream.getTracks().forEach((t) => t.stop());
     liveStream = null;
   }
-  if (voiceMode === "hotkey") {
-    if (gs && hotkeyAction(voiceMode, hotkeyBound) === "register") {
+  const mode = gameVoiceMode(voiceMode, gameOn);
+  if (mode === "hotkey") {
+    if (gs && hotkeyAction(mode, hotkeyBound) === "register") {
       await bindHotkey(gs);
     } else if (hotkeyBound) {
       voiceHintSet(holdHint());
@@ -1330,6 +1358,7 @@ void applyVoiceMode();
 
 interface UiState {
   state: { mood?: string; activity?: string };
+  game?: { on: boolean; app?: string; enabled?: boolean };
   config: {
     tts_volume?: number;
     voice_mode?: string;
@@ -1419,8 +1448,9 @@ async function refreshState(): Promise<boolean> {
     const ok = await setTrayCheck("focus", focusOn);
     if (ok) lastTrayFocus = focusOn;
   }
-  // окно спрятано в трей — не тратим GPU на рендер
-  setHidden(await isAyaHidden());
+  await applyGame(ui.game);
+  // окно спрятано в трей или идёт игра — не тратим GPU на рендер
+  await syncRender();
   return true;
 }
 setInterval(refreshState, 5000);
@@ -1463,7 +1493,7 @@ let lastTrayFollowup: boolean | null = null;
 let lastTrayFocus: boolean | null = null;
 
 async function pollInitiative() {
-  if (!initiativeOn || busy) return;
+  if (!initiativeOn || busy || gameOn) return; // в игре сама не заговаривает
   if (rec && rec.state === "recording") return;
   if (Date.now() < initiativeCool) return;
   const myTurn = turnSeq;
@@ -1951,6 +1981,7 @@ async function onFilesDropped(paths: string[]) {
 void initDesktopWalk({
   enabled: () => walkOn,
   canMove: () =>
+    !gameOn &&
     !panelOpen &&
     !busy &&
     !speakPlaying &&
@@ -2030,7 +2061,7 @@ void initAvatar($("stage")).then(() => void refreshState());
 void (async () => {
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().onFocusChanged(async () => setHidden(await isAyaHidden()));
+    await getCurrentWindow().onFocusChanged(() => void syncRender());
     // консоль сменила модель — перезагружаем окно, чтобы Ая «переоделась»
     const { listen } = await import("@tauri-apps/api/event");
     await listen<{ key: HotkeyKey; accel: string }>("aya-hotkeys", async (ev) => {
@@ -2050,7 +2081,7 @@ void (async () => {
     });
   } catch {}
 })();
-void initHoverPass(clickThroughOn);
+void initHoverPass(clickThroughOn, () => gameOn);
 void initDrop();
 void bootState();
 startUpdateChecks((line) => showBubble(line, { holdMs: 8000 }));

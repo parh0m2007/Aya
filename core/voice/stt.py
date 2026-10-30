@@ -17,8 +17,13 @@ _info = {"device": "", "model": "", "error": ""}
 _lock = threading.Lock()
 _dll_done = False
 _force_cpu = False  # CUDA уже подвела в этом запуске — дальше только CPU
+_game = False  # игровой режим: лёгкая модель на 2 ядрах процессора
 
 MODELS = ("base", "small", "medium", "large-v3-turbo")
+# Замер на русской речи (фраза 2,5–4 с): small на всех ядрах — 1,6 с,
+# small на 2 ядрах — 2,2 с, base на 2 ядрах — 0,7 с и в разы меньше нагрузки.
+GAME_MODEL = "base"
+GAME_THREADS = 2
 
 
 def _setting(key: str, default: str) -> str:
@@ -69,10 +74,59 @@ def wanted() -> tuple[str, str]:
     size = os.environ.get("AYA_STT_MODEL") or _setting("stt_model", "small")
     if size not in MODELS:
         size = "small"
+    if _game:
+        # видеокарта и все ядра нужны игре; лёгкую модель в игре не скачиваем (пинг)
+        return (GAME_MODEL if cached(GAME_MODEL) else size), "cpu"
     device = os.environ.get("AYA_STT_DEVICE") or _setting("stt_device", "auto")
     if device not in ("auto", "cuda", "cpu"):
         device = "auto"
     return size, device
+
+
+def threads() -> int:
+    """Сколько ядер даём распознаванию: 0 — сколько решит библиотека (все)."""
+    return GAME_THREADS if _game else 0
+
+
+def cached(size: str) -> bool:
+    """Модель уже на диске (не будет скачиваться)."""
+    try:
+        from faster_whisper.utils import download_model
+
+        download_model(size, local_files_only=True)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def prefetch_game_model() -> None:
+    """Один раз заранее скачать лёгкую модель (~150 МБ) — не во время игры."""
+    if cached(GAME_MODEL):
+        return
+    from .. import runtime
+
+    runtime.prefetch_whisper(GAME_MODEL)
+
+
+def _preload() -> None:
+    try:
+        with _lock:
+            get_model()
+    except Exception:  # noqa: BLE001 — загрузится при первой фразе
+        pass
+
+
+def set_game(on: bool) -> None:
+    """Игра началась/закончилась: выгрузить текущую модель и заранее загрузить
+    нужную (лёгкая — за полсекунды), чтобы первая фраза не ждала."""
+    global _model, _game
+    with _lock:
+        if _game == on:
+            return
+        _game = on
+        _model = None
+    _info.update(device="", model="")
+    threading.Thread(target=_preload, daemon=True, name="aya-stt-preload").start()
 
 
 def cuda_libs_available() -> bool:
@@ -108,7 +162,7 @@ def get_model():
             _model = None
             _info["error"] = f"GPU недоступна: {str(e)[:160]}"
     if _model is None:
-        _model = WhisperModel(size, device="cpu", compute_type="int8")
+        _model = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=threads())
         _info.update(device="cpu", model=size)
     modelmgr.touch("whisper")
     return _model
@@ -145,7 +199,7 @@ def reset() -> None:
 
 def status() -> dict:
     size, device = wanted()
-    return {"model": size, "device": device, "loaded": _model is not None, "active_device": _info["device"], "error": _info["error"], "models": list(MODELS)}
+    return {"model": size, "device": device, "loaded": _model is not None, "active_device": _info["device"], "error": _info["error"], "models": list(MODELS), "game": _game}
 
 
 def transcribe(wav_bytes: bytes) -> str:

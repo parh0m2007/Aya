@@ -147,6 +147,14 @@ Updates arrive in one click — Aya tells you when a new version is out.
 
 Both hotkeys are configurable: *Console → Voice → Hotkeys*.
 
+### 🎮 Game mode
+
+Playing Valorant, CS2, Dota 2 or anything else full-screen? Aya notices and gets out of the way:
+she slips under the game, stops drawing and listening for *“Aya, …”*, recognizes speech with a
+light model on 2 CPU cores, speaks with a cloud voice and lowers her priority so the game gets the CPU first.
+Hold the hotkey to talk — she answers by voice. Nothing is injected into the game, so it’s safe with
+anti-cheat. Turn it off in *Console → System*.
+
 ## 🔒 Privacy & safety
 
 - **Your data stays on your PC** — settings, memory and chats live in `%USERPROFILE%\.aya`.

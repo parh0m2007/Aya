@@ -21,7 +21,7 @@ function isSolidElement(el: Element | null): boolean {
 
 let pressing = false;
 
-export async function initHoverPass(enabled: () => boolean): Promise<void> {
+export async function initHoverPass(enabled: () => boolean, paused: () => boolean = () => false): Promise<void> {
   window.addEventListener("pointerdown", () => (pressing = true), true);
   window.addEventListener("pointerup", () => (pressing = false), true);
   window.addEventListener("blur", () => (pressing = false));
@@ -72,7 +72,7 @@ export async function initHoverPass(enabled: () => boolean): Promise<void> {
   };
 
   const tick = async () => {
-    if (busy || document.visibilityState === "hidden") return;
+    if (busy || document.visibilityState === "hidden" || paused()) return; // в игре курсор не опрашиваем
     busy = true;
     try {
       const cur = await api.cursorPosition();
