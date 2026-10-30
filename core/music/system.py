@@ -123,12 +123,13 @@ def audio_sessions(active_only: bool = True) -> list:
     return out
 
 
-def _window_titles(pid: int) -> list[str]:
+def _windows(pid: int) -> list[tuple[int, str]]:
+    """Видимые окна процесса: [(hwnd, заголовок)]."""
     import ctypes
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
-    titles: list[str] = []
+    found: list[tuple[int, str]] = []
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def cb(hwnd, _l):
@@ -141,11 +142,15 @@ def _window_titles(pid: int) -> list[str]:
             if n:
                 buf = ctypes.create_unicode_buffer(n + 1)
                 user32.GetWindowTextW(hwnd, buf, n + 1)
-                titles.append(buf.value)
+                found.append((hwnd, buf.value))
         return True
 
     user32.EnumWindows(cb, 0)
-    return titles
+    return found
+
+
+def _window_titles(pid: int) -> list[str]:
+    return [t for _h, t in _windows(pid)]
 
 
 def _browser_title(proc_name: str) -> str:
@@ -162,6 +167,65 @@ def _browser_title(proc_name: str) -> str:
             if m:
                 return m.group(1).strip()
     return ""
+
+
+# Яндекс Браузер не передаёт YouTube мультимедийные «дальше/назад» — зато сам
+# YouTube понимает Shift+N / Shift+P (назад — только в плейлисте; Ая открывает
+# YouTube с «миксом», так что плейлист есть)
+YT_KEYS = {"next": "N", "prev": "P"}
+_YT_TITLE = re.compile(r"\s[-–—]\s+YouTube(?!\s+Music)\b")
+
+
+def _youtube_window(proc_name: str) -> int:
+    """hwnd окна браузера, где активная вкладка — YouTube (не YouTube Music)."""
+    try:
+        import psutil
+    except Exception:  # noqa: BLE001
+        return 0
+    for p in psutil.process_iter(["name"]):
+        if (p.info.get("name") or "").lower() != proc_name:
+            continue
+        for hwnd, t in _windows(p.pid):
+            if _YT_TITLE.search(t):
+                return hwnd
+    return 0
+
+
+def _youtube_key(hwnd: int, action: str) -> None:
+    """На миг сделать окно с YouTube активным, нажать Shift+N/P и вернуть фокус.
+    Без Alt-трюка: Alt открыл бы меню браузера и оно съело бы Shift+N."""
+    import ctypes
+
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    prev = user32.GetForegroundWindow()
+
+    def focus(hwnd_to: int) -> None:
+        fg = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
+        me = kernel32.GetCurrentThreadId()
+        user32.AttachThreadInput(me, fg, True)
+        user32.SetForegroundWindow(hwnd_to)
+        user32.BringWindowToTop(hwnd_to)
+        user32.AttachThreadInput(me, fg, False)
+
+    focus(hwnd)
+    time.sleep(0.3)
+    vk = ord(YT_KEYS[action])
+    user32.keybd_event(0x10, 0, 0, 0)  # Shift
+    user32.keybd_event(vk, 0, 0, 0)
+    user32.keybd_event(vk, 0, 2, 0)
+    user32.keybd_event(0x10, 0, 2, 0)
+    time.sleep(0.15)
+    if prev and prev != hwnd:
+        focus(prev)
+
+
+def _in_game() -> bool:
+    try:
+        from .. import gamemode
+
+        return gamemode.active()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _browser_playing() -> dict | None:
@@ -256,7 +320,14 @@ def control(action: str) -> dict:
         if action in ("pause", "stop") and not playing:
             return {**base, "ok": True, "status": "paused", "title": _browser_title(proc)}
         before = _browser_title(proc) if proc in BROWSERS else ""
-        _press(KEYS[action])
+        yt = _youtube_window(proc) if action in YT_KEYS and proc in BROWSERS else 0
+        if yt and _in_game():
+            # переключать окно браузера посреди игры = свернуть игру
+            return {**base, "ok": False, "status": "playing", "title": before, "note": "game"}
+        if yt:
+            _youtube_key(yt, action)
+        else:
+            _press(KEYS[action])
         _LAST.update(via="keys", proc=proc, aumid="", ts=time.time())
         if action in ("next", "prev"):
             # не все браузеры понимают «дальше» с клавиатуры (Яндекс Браузер — нет):
@@ -267,7 +338,7 @@ def control(action: str) -> dict:
                 time.sleep(0.4)
                 after = _browser_title(proc)
             if before and after == before:
-                return {**base, "ok": False, "status": "playing", "title": before, "note": "no_next"}
+                return {**base, "ok": False, "status": "playing", "title": before, "note": "yt_stuck" if yt else "no_next"}
             return {**base, "ok": True, "status": "playing", "title": after}
         # звуковой сеанс гаснет с задержкой ~1 с — состояние знаем сами
         status = {"pause": "paused", "stop": "paused", "play": "playing"}.get(action, "paused" if playing else "playing")

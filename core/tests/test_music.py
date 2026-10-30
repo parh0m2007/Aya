@@ -218,7 +218,7 @@ def test_music_tool_is_free(db_reset, monkeypatch):
         ("пауза", "pause"), ("Ая, пауза!", "pause"), ("поставь на паузу", "pause"), ("выключи музыку", "pause"),
         ("продолжи музыку", "resume"), ("сними с паузы", "resume"),
         ("следующий трек", "next"), ("включи следующую песню", "next"), ("переключи", "next"), ("пропусти", "next"),
-        ("предыдущий трек", "prev"), ("что играет?", "now"), ("что это за песня", "now"), ("кто поёт", "now"),
+        ("предыдущий трек", "prev"), ("включи прошлую песню", "prev"), ("переключи песню", "next"), ("что играет?", "now"), ("что это за песня", "now"), ("кто поёт", "now"),
         ("продолжи", None), ("дальше", None), ("продолжи рассказ", None), ("стоп", None),
         ("включи кино группа крови", None), ("переключи вкладку", None),
     ],
@@ -266,6 +266,65 @@ def test_resume_goes_to_last_controlled_player(db_reset, monkeypatch):
     # а если потом снова скомандовать волне — она снова главная
     player.command("play")
     assert music.control("pause")["via"] == "aya"
+
+
+def _youtube_in_yandex_browser(monkeypatch, titles):
+    """YouTube играет в Яндекс Браузере (без SMTC); titles — заголовки по очереди."""
+    seq = list(titles)
+    monkeypatch.setattr(system, "_smtc_playing", lambda: None)
+    monkeypatch.setattr(system, "_browser_playing", lambda: {"status": "playing", "app": "Яндекс Браузер", "proc": "browser.exe", "via": "keys"})
+    monkeypatch.setattr(system, "_browser_title", lambda proc: seq.pop(0) if len(seq) > 1 else seq[0])
+    monkeypatch.setattr(system, "_youtube_window", lambda proc: 42)
+    monkeypatch.setattr(system.time, "sleep", lambda s: None)
+    pressed = []
+    monkeypatch.setattr(system, "_press", lambda key: pressed.append(("media", key)))
+    monkeypatch.setattr(system, "_youtube_key", lambda hwnd, action: pressed.append(("youtube", hwnd, action)))
+    return pressed
+
+
+def test_youtube_next_and_prev_use_youtube_shortcuts(monkeypatch):
+    """Мультимедийные «дальше/назад» Яндекс Браузер YouTube не передаёт — жмём Shift+N/P в окне YouTube."""
+    monkeypatch.setattr(system, "_in_game", lambda: False)
+    pressed = _youtube_in_yandex_browser(monkeypatch, ["Группа крови", "Спокойная ночь"])
+    d = system.control("next")
+    assert pressed == [("youtube", 42, "next")]
+    assert d["ok"] and d["title"] == "Спокойная ночь"
+    pressed = _youtube_in_yandex_browser(monkeypatch, ["Спокойная ночь", "Группа крови"])
+    assert system.control("prev")["ok"] and pressed == [("youtube", 42, "prev")]
+
+
+def test_youtube_pause_still_uses_media_key(monkeypatch):
+    monkeypatch.setattr(system, "_in_game", lambda: False)
+    pressed = _youtube_in_yandex_browser(monkeypatch, ["Группа крови"])
+    system.control("pause")
+    assert pressed == [("media", system.KEYS["pause"])]
+
+
+def test_youtube_not_switched_during_game(monkeypatch, db_reset):
+    """В игре не переключаем окно на браузер — это свернуло бы игру."""
+    monkeypatch.setattr(system, "_in_game", lambda: True)
+    pressed = _youtube_in_yandex_browser(monkeypatch, ["Группа крови"])
+    d = system.control("next")
+    assert pressed == [] and d["note"] == "game"
+    monkeypatch.setattr(music, "control", lambda a: d)
+    assert "игр" in music.tool({"action": "next"})
+
+
+def test_youtube_stuck_explains_playlist(monkeypatch, db_reset):
+    monkeypatch.setattr(system, "_in_game", lambda: False)
+    _youtube_in_yandex_browser(monkeypatch, ["Группа крови"])
+    d = system.control("prev")
+    assert d["note"] == "yt_stuck"
+    monkeypatch.setattr(music, "control", lambda a: d)
+    line = music.tool({"action": "prev"})
+    assert "плейлист" in line and "браузер не переключает" not in line
+
+
+def test_youtube_title_matches_only_youtube():
+    assert system._YT_TITLE.search("Группа крови - YouTube, профиль роман — Яндекс Браузер")
+    assert system._YT_TITLE.search("(3) Numb – YouTube — Google Chrome")
+    assert not system._YT_TITLE.search("Numb - YouTube Music — Яндекс Браузер")
+    assert not system._YT_TITLE.search("Группа крови — Яндекс Музыка")
 
 
 def test_track_end_is_not_user_action(db_reset):
