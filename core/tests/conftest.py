@@ -44,10 +44,16 @@ def conftest_ws():
 
 
 @pytest.fixture
-def client():
+def client(tmp_path_factory, monkeypatch):
     import core.main as main  # noqa: PLC0415
     from fastapi.testclient import TestClient  # noqa: PLC0415
 
+    # свой config.json с тестовой моделью: тесты не зависят от настоящего ~/.aya
+    # (у автора там рабочий ключ, на чистой машине CI — нет) и не пишут в него.
+    # Нужен другой конфиг — фикстура cfg_tmp подменит этот.
+    cfg = tmp_path_factory.mktemp("cfg") / "config.json"
+    cfg.write_text('{"llm": {"type": "openai_compatible", "base_url": "http://127.0.0.1:9/v1", "model": "test", "api_key": "k"}}', encoding="utf-8")
+    monkeypatch.setattr(main, "CONFIG_FILE", cfg)
     with TestClient(main.app) as c:
         reset_engine_data()
         try:
