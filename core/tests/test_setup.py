@@ -67,12 +67,31 @@ def test_fish_check(client, db_reset, fake_http):
     assert "good" not in json.dumps(client.get("/api/setup").json())
 
 
-def test_new_user_default_llm_is_ollama_cloud(tmp_path, monkeypatch):
+def test_new_user_default_llm_is_openrouter_free(tmp_path, monkeypatch):
+    """Ollama с конца октября 2026 берёт плату за облако — по умолчанию бесплатный OpenRouter."""
     import core.main as main
 
     monkeypatch.setattr(main, "CONFIG_FILE", tmp_path / "config.json")
     llm = main.load_config()["llm"]
-    assert (llm["type"], llm["base_url"], llm["model"]) == ("ollama", "https://ollama.com", "gemma4:31b-cloud")
+    assert (llm["type"], llm["base_url"], llm["model"]) == ("openai_compatible", "https://openrouter.ai/api/v1", "google/gemma-4-31b-it:free")
+
+
+OPENROUTER = {"type": "openai_compatible", "base_url": "https://openrouter.ai/api/v1", "api_key": "abc", "model": "google/gemma-4-31b-it:free"}
+
+
+def test_llm_check_paid_model(client, db_reset, cfg_tmp, fake_http):
+    """402 — ключ верный, но модель платная (облачная Ollama теперь такая)."""
+    fake_http.get("https://ollama.com/api/tags", json={"models": [{"name": "gemma4:31b"}]})
+    fake_http.post("https://ollama.com/api/chat", status=402)
+    r = client.post("/api/setup/llm/check", json=CLOUD).json()
+    assert r["ok"] is False and r["error"] == "paid" and r["models"] == ["gemma4:31b"]
+
+
+def test_openrouter_free_models_first(client, db_reset, cfg_tmp, fake_http):
+    fake_http.get("https://openrouter.ai/api/v1/models", json={"data": [{"id": "x/paid"}, {"id": "google/gemma-4-31b-it:free"}, {"id": "y/other:free"}]})
+    fake_http.post("https://openrouter.ai/api/v1/chat/completions", json={"choices": []})
+    r = client.post("/api/setup/llm/check", json=OPENROUTER).json()
+    assert r["ok"] and r["models"] == ["google/gemma-4-31b-it:free", "y/other:free", "x/paid"]
 
 
 def test_llm_check_bad_key_with_public_model_list(client, db_reset, cfg_tmp, fake_http):
@@ -103,8 +122,9 @@ def test_open_only_known_pages(client, monkeypatch):
     monkeypatch.setattr(main.music, "open_in_browser", lambda url: opened.append(url) or "browser.exe")
     assert client.post("/api/setup/open", json={"target": "ollama_keys"}).json()["ok"]
     assert client.post("/api/setup/open", json={"target": "fish_keys"}).json()["ok"]
+    assert client.post("/api/setup/open", json={"target": "openrouter_keys"}).json()["ok"]
     assert client.post("/api/setup/open", json={"target": "https://evil.example"}).status_code == 404
-    assert opened == ["https://ollama.com/settings/keys", "https://fish.audio/app/api-keys/"]
+    assert opened == ["https://ollama.com/settings/keys", "https://fish.audio/app/api-keys/", "https://openrouter.ai/settings/keys"]
 
 
 def test_llm_check_network_drop_is_offline(client, db_reset, cfg_tmp, fake_http):

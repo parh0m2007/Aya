@@ -9,7 +9,9 @@ from . import skills, tools
 GATED_LINES = {
     "open_app": (
         "- open_app {app_id: ЛЮБОЕ установленное приложение по имени: telegram, notepad, calc, paint, code, browser, chrome, edge, terminal, spotify…} — открыть приложение\n"
-        "- open_app {target: https://…} — открыть ссылку в браузере\n"
+        "  (browser — просто открыть браузер пользователя, без сайта)\n"
+        "- open_app {target: https://…} — открыть ссылку в браузере. Найти что-то в браузере — "
+        "target https://www.google.com/search?q=<запрос>; открыть сайт — его адрес (https://youtube.com и т.п.)\n"
         "- open_app {target: C:\\путь\\прог.exe} — запустить конкретный exe\n"
     ),
     "set_volume": "- set_volume {level: 0..100}\n",
@@ -19,7 +21,7 @@ GATED_LINES = {
     "write_allowed_file": "- write_allowed_file {name: имя файла в рабочей папке, content: текст до 20000 символов} — требует подтверждения пользователя\n",
     "read_allowed_file": "- read_allowed_file {name: имя файла в рабочей папке, offset?: номер строки, limit?: сколько строк} — читать код и тексты (по умолчанию 120 строк)\n",
     "grep_folder": "- grep_folder {query: что искать, sub?: подпапка} — поиск по содержимому файлов рабочей папки\n",
-    "web_search": "- web_search {query: string} — поиск в интернете (DuckDuckGo, топ-6 результатов)\n",
+    "web_search": "- web_search {query: string} — найти в интернете и прочитать самой топ-6 результатов (браузер не открывает)\n",
     "web_open": "- web_open {url: string} — открыть страницу и прочитать её текст\n",
     "run_cmd": (
         "- run_cmd {command: команда PowerShell} — запуск команды в рабочей папке, требует подтверждения пользователя. "

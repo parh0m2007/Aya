@@ -88,6 +88,13 @@ FREE_ACTIONS = {"remember_fact", "switch_agent", "list_skills", "load_skill", "d
 RATE_LIMIT = "perm_rate_limit"  # действий за минуту, пользователь может задать в config
 
 
+def _default_browser() -> tuple[str, str]:
+    """(exe, процесс) браузера по умолчанию; ("", "") — не нашли."""
+    from ..music.worker import default_browser
+
+    return default_browser()
+
+
 def allowed_folder() -> str:
     return db.setting("allowed_folder", "")
 
@@ -292,9 +299,12 @@ def run_action(name: str, args: dict) -> str:
                 db.log_event("tool", f"opened {os.path.basename(target)}")
                 return f"открыла {os.path.basename(target)}"
             return "target должен быть URL или путём к .exe"
+        # «открой браузер» — сам браузер со своей стартовой страницей. Раньше здесь
+        # открывался duckduckgo.com, и люди видели рекламу браузера DuckDuckGo.
+        exe = _default_browser()[0] if app_id.lower() == "browser" else ""
         known = {
             "notepad": ["notepad"], "explorer": ["explorer"], "calc": ["calc"], "paint": ["mspaint"],
-            "browser": ["cmd", "/c", "start", "", "https://duckduckgo.com"],
+            "browser": [exe] if exe else ["cmd", "/c", "start", "", "msedge"],
             "chrome": ["cmd", "/c", "start", "", "chrome"],
             "edge": ["cmd", "/c", "start", "", "msedge"],
             "terminal": ["cmd", "/c", "start", "", "wt"],

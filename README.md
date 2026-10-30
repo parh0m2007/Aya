@@ -23,7 +23,7 @@ Hold a key and talk to her, or just say *“Aya, …”*. She answers out loud, 
 you told her last week, plays your music, sets reminders, and — **only with your
 permission** — opens apps, searches your files and runs commands for you.
 
-Free to run: the default brain is a **free cloud model** (gemma4 on ollama.com) and the
+Free to run: the default brain is a **free cloud model** (gemma4 on OpenRouter, no card needed) and the
 default voice is **free Fish Audio**. Or bring your own — local Ollama or any
 OpenAI-compatible API.
 
@@ -98,8 +98,8 @@ long.
 <td valign="top">
 
 **🔌 Any brain you like**
-Ollama cloud (default, free), **Ollama on your own PC**, or any **OpenAI-compatible**
-API — OpenRouter, Groq, LM Studio, vLLM… Pick the model from a list, no config files.
+OpenRouter (default, free models), **Ollama on your own PC**, Ollama cloud, or any
+**OpenAI-compatible** API — Groq, LM Studio, vLLM… Pick the model from a list, no config files.
 
 </td>
 </tr>
@@ -123,7 +123,8 @@ API — OpenRouter, Groq, LM Studio, vLLM… Pick the model from a list, no conf
 1. **[Download `Aya_x64-setup.exe`](https://github.com/parh0m2007/Aya/releases/latest)** and run it.
    No admin rights, no Python, nothing else to install.
 2. A short setup opens. Paste a free key from
-   **[ollama.com/settings/keys](https://ollama.com/settings/keys)** (*Add API Key*) — she checks it right away.
+   **[openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)** (*Create API Key*, no card) — she checks it right away.
+   Free models give you 50 replies a day.
 3. *(Optional)* For a lively voice, add a free key from
    **[fish.audio → API Keys](https://fish.audio/app/api-keys/)**. Skip it and she uses a simple built-in voice.
 4. Pick your mic and a hotkey, give her a name — and say hi. 👋

@@ -74,6 +74,29 @@ def test_open_app_url(monkeypatch, conftest_ws):
     assert calls and "start" in calls[0] and "https://duckduckgo.com" in calls[0]
 
 
+def test_open_browser_starts_default_browser_without_ads(monkeypatch, conftest_ws):
+    """Тестеры: «открой браузер» открывал рекламу DuckDuckGo. Теперь — сам браузер, без сайта."""
+    _enable("open_app")
+    calls = []
+    monkeypatch.setattr(tools.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(tools, "_default_browser", lambda: ("C:\\B\\chrome.exe", "chrome.exe"))
+    assert "открыла" in tools.run_action("open_app", {"app_id": "browser"})
+    assert calls == [["C:\\B\\chrome.exe"]]
+    calls.clear()
+    monkeypatch.setattr(tools, "_default_browser", lambda: ("", ""))  # не нашли — Edge есть в любой Windows
+    tools.run_action("open_app", {"app_id": "browser"})
+    assert calls == [["cmd", "/c", "start", "", "msedge"]]
+
+
+def test_tool_text_does_not_suggest_duckduckgo():
+    """Модель не должна открывать вкладки DuckDuckGo: поиск в браузере — через Google."""
+    from core.safety import tool_text
+
+    assert "duckduckgo" not in tool_text.GATED_LINES["open_app"].lower()
+    assert "duckduckgo" not in tool_text.GATED_LINES["web_search"].lower()
+    assert "google.com/search" in tool_text.GATED_LINES["open_app"]
+
+
 def test_open_app_any_exe(monkeypatch, conftest_ws):
     _enable("open_app")
     calls = []

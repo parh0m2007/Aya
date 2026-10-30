@@ -8,6 +8,7 @@
 Все функции синхронные и должны идти в музыкальном потоке (worker.py).
 """
 import asyncio
+import json
 import re
 import threading
 import time
@@ -309,6 +310,20 @@ def describe_line(d: dict) -> str:
 _DUCK = {"reasons": set(), "since": 0.0, "volumes": {}, "paused": None}
 _DUCK_LOCK = threading.Lock()
 DUCK_MODES = ("lower", "pause", "off")
+_DUCK_SAVED = "music_duck_saved"  # {процесс: громкость до приглушения} — на случай падения
+
+# приглушаем только то, где играет музыка: браузер и плееры. Звонки, игры,
+# видео в отдельных программах не трогаем.
+PLAYER_PROCS = {
+    "spotify.exe", "vlc.exe", "aimp.exe", "foobar2000.exe", "wmplayer.exe", "music.ui.exe",
+    "itunes.exe", "applemusic.exe", "deezer.exe", "winamp.exe", "musicbee.exe", "tidal.exe",
+    "yandexmusic.exe", "soundcloud.exe", "potplayermini64.exe", "potplayermini.exe",
+}
+
+
+def is_music_proc(name: str) -> bool:
+    low = (name or "").lower()
+    return low in BROWSERS or low in PLAYER_PROCS or "music" in low or "музык" in low
 
 
 def duck_mode() -> str:
@@ -347,15 +362,23 @@ def duck(on: bool, reason: str = "speak", on_timer=None) -> dict:
 def _duck_apply(mode: str) -> dict:
     if mode == "lower":
         level = duck_level()
+        saved = {}
         for s in audio_sessions():
             try:
+                name = s.Process.name()
+                if not is_music_proc(name):
+                    continue
                 vol = s.SimpleAudioVolume
                 cur = vol.GetMasterVolume()
                 _DUCK["volumes"][s.Process.pid] = (vol, cur)
+                saved[name.lower()] = cur
                 vol.SetMasterVolume(cur * level, None)
             except Exception:  # noqa: BLE001
                 continue
         if _DUCK["volumes"]:
+            # Windows запоминает громкость программы: если ядро упадёт посреди
+            # речи, музыка так и осталась бы тихой — запишем, что вернуть
+            db.set_setting(_DUCK_SAVED, json.dumps(saved, ensure_ascii=False))
             return {"ducked": True, "mode": "lower"}
         return {"ducked": False, "mode": "lower"}
     playing = _smtc_playing() or _browser_playing()
@@ -378,6 +401,8 @@ def _duck_restore() -> dict:
             restored = True
         except Exception:  # noqa: BLE001
             pass
+    if _DUCK["volumes"]:
+        db.set_setting(_DUCK_SAVED, "")
     _DUCK["volumes"].clear()
     paused, _DUCK["paused"] = _DUCK["paused"], None
     if paused:
@@ -388,6 +413,33 @@ def _duck_restore() -> dict:
             _press(KEYS["play"])
         restored = True
     return {"ducked": False, "restored": restored}
+
+
+def release_duck() -> None:
+    """Ядро закрывается — вернуть всё, что приглушили."""
+    with _DUCK_LOCK:
+        _DUCK["reasons"].clear()
+        _duck_restore()
+
+
+def recover_duck() -> None:
+    """При запуске: прошлый раз ядро закрылось посреди речи — вернуть громкость."""
+    try:
+        saved = json.loads(db.setting(_DUCK_SAVED, "") or "{}")
+    except ValueError:
+        saved = {}
+    if not saved:
+        return
+    with _DUCK_LOCK:
+        for s in audio_sessions(active_only=False):
+            try:
+                want = saved.get(s.Process.name().lower())
+                vol = s.SimpleAudioVolume
+                if want is not None and vol.GetMasterVolume() < want:
+                    vol.SetMasterVolume(float(want), None)
+            except Exception:  # noqa: BLE001
+                continue
+        db.set_setting(_DUCK_SAVED, "")
 
 
 def duck_watchdog() -> None:

@@ -2,6 +2,27 @@ class LLMError(Exception):
     pass
 
 
+_REDO = "консоль → Система → «Пройти настройку заново»"
+
+
+def friendly_error(raw: str) -> str:
+    """Ошибка модели — человеческими словами и с тем, что делать."""
+    low = (raw or "").lower()
+    if "http 402" in low:
+        return (
+            "Модель платная или на счёте закончились деньги. Облачная Ollama с конца октября "
+            f"берёт плату за каждый запрос. Бесплатно — OpenRouter с моделью «:free»: {_REDO}."
+        )
+    if "http 429" in low:
+        return (
+            "Модель сейчас перегружена или бесплатные ответы на сегодня кончились "
+            "(у OpenRouter — 50 в день). Попробуй через минуту или завтра, либо выбери другую модель."
+        )
+    if "http 401" in low or "http 403" in low:
+        return f"Ключ модели не подошёл — вставь новый: {_REDO}."
+    return f"Ошибка LLM: {raw}"
+
+
 class BaseAdapter:
     name = "base"
 

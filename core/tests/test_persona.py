@@ -19,11 +19,45 @@ def test_save_builds_prompt_from_traits(db_reset):
     text = prompting.build_system_prompt({"mood": "joyful"})
     assert "Ты — Мику" in text
     assert "наставница" in text
-    assert "Часто шутишь" in text
-    assert "Сдержанная" in text
+    assert "Шутишь почти в каждой реплике" in text
+    assert "Холодная" in text
     assert "на «вы»" in text
     assert "Рома" in text and "любит чай" in text
     assert "радостное" in text
+
+
+def test_every_slider_step_changes_character():
+    """Тестеры: «двигаю ползунки — характер не меняется». Каждая из пяти ступеней — свой текст."""
+    for trait in persona.TRAITS:
+        texts = set()
+        for v in (10, 30, 50, 70, 90):
+            p = persona.normalize({"traits": {trait: v}})
+            texts.add(tuple(persona.character_lines(p)))
+        assert len(texts) == 5, trait
+
+
+def test_presets_differ_clearly():
+    """Любые два готовых характера расходятся минимум в трёх чертах из пяти."""
+    lines = {pr["id"]: persona.character_lines(persona.normalize(pr["patch"])) for pr in persona.PRESETS}
+    ids = list(lines)
+    for i, a in enumerate(ids):
+        for b in ids[i + 1:]:
+            diff = sum(x != y for x, y in zip(lines[a], lines[b]))
+            assert diff >= 3, (a, b, diff)
+
+
+def test_character_reminder_is_last(db_reset):
+    """Характер повторяется в самом конце — после длинного списка инструментов
+    и важнее манеры из прошлых реплик."""
+    persona.save({"traits": {"humor": 95, "warmth": 5}})
+    text = prompting.build_system_prompt({"mood": "calm"}, tools="ИНСТРУМЕНТЫ")
+    tail = text[text.index("ИНСТРУМЕНТЫ"):]
+    assert "Помни свой характер" in tail and "постоянно шутишь" in tail and "холодная" in tail
+
+
+def test_unconfigured_persona_has_no_reminder(db_reset):
+    text = prompting.build_system_prompt({"mood": "calm"}, tools="ИНСТРУМЕНТЫ")
+    assert text.endswith("ИНСТРУМЕНТЫ") and "Помни свой характер" not in text
 
 
 def test_normalize_clamps_and_filters():

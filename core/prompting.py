@@ -14,7 +14,8 @@ DEFAULT_SYSTEM = """Ты — Ая, настольная аниме-компан�
 Продолжи одну из последних тем, если уместно."""
 
 
-def build_system_prompt(state: dict) -> str:
+def build_system_prompt(state: dict, tools: str = "") -> str:
+    """tools — инструкции по инструментам; характер напоминаем уже после них."""
     from . import agents, persona
 
     prof = persona.load()
@@ -29,9 +30,12 @@ def build_system_prompt(state: dict) -> str:
             base = style.replace("{state}", state_line(state))
     facts_text = "\n".join(f"- {k}: {v}" for k, v, _ in db.facts()[-15:])
     memory = f"\n\nЧто ты помнишь о пользователе:\n{facts_text}" if facts_text else ""
-    persona = agents.persona_block()
-    tail = ("\n\n" + persona) if persona else ""
-    return base + memory + tail
+    souls = agents.persona_block()
+    tail = ("\n\n" + souls) if souls else ""
+    text = base + memory + tail + (("\n\n" + tools) if tools else "")
+    if prof.get("configured"):
+        text += "\n\n" + persona.reminder(prof)
+    return text
 
 
 def state_line(s: dict) -> str:

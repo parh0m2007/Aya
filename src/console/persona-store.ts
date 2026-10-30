@@ -93,11 +93,13 @@ export function addTag(tags: string[], tag: string): string[] {
   return [...tags, t];
 }
 
-/** Подпись уровня черты для UI. */
+/** Подпись уровня черты для UI — те же пять ступеней, что в промпте ядра (persona.py). */
 export function traitWord(v: number, t: { lo: string; hi: string }): string {
-  if (v >= 67) return t.hi;
-  if (v < 34) return t.lo;
-  return "в меру";
+  if (v >= 80) return `очень ${t.hi}`;
+  if (v >= 60) return t.hi;
+  if (v >= 40) return "в меру";
+  if (v >= 20) return t.lo;
+  return `очень ${t.lo}`;
 }
 
 /** Краткое описание характера одной строкой — для главной. */

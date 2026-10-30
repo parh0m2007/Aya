@@ -36,9 +36,12 @@ describe("конструктор персоны", () => {
     expect(addTag(many, "ещё")).toHaveLength(8);
   });
   it("подписи уровней и сводка", () => {
-    expect(traitWord(90, { lo: "a", hi: "b" })).toBe("b");
-    expect(traitWord(10, { lo: "a", hi: "b" })).toBe("a");
+    // пять ступеней — как в промпте ядра (0–19, 20–39, 40–59, 60–79, 80–100)
+    expect(traitWord(90, { lo: "a", hi: "b" })).toBe("очень b");
+    expect(traitWord(70, { lo: "a", hi: "b" })).toBe("b");
     expect(traitWord(50, { lo: "a", hi: "b" })).toBe("в меру");
+    expect(traitWord(30, { lo: "a", hi: "b" })).toBe("a");
+    expect(traitWord(10, { lo: "a", hi: "b" })).toBe("очень a");
     expect(summary(base)).toContain("заботливая");
   });
 });

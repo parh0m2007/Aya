@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STEPS, errorText, llmPreset, modelOptions } from "./setup-logic";
+import { STEPS, errorText, llmKindOf, llmPreset, modelOptions } from "./setup-logic";
 
 describe("мастер: логика", () => {
   it("шаги по порядку", () => {
@@ -7,6 +7,7 @@ describe("мастер: логика", () => {
   });
 
   it("пресеты моделей", () => {
+    expect(llmPreset("openrouter")).toEqual({ type: "openai_compatible", base_url: "https://openrouter.ai/api/v1", model: "google/gemma-4-31b-it:free", needsKey: true });
     expect(llmPreset("ollama_cloud")).toEqual({ type: "ollama", base_url: "https://ollama.com", model: "gemma4:31b-cloud", needsKey: true });
     expect(llmPreset("ollama_local")).toEqual({ type: "ollama", base_url: "http://127.0.0.1:11434", model: "", needsKey: false });
     expect(llmPreset("openai")).toEqual({ type: "openai_compatible", base_url: "", model: "", needsKey: true });
@@ -17,7 +18,15 @@ describe("мастер: логика", () => {
     expect(errorText("offline")).toBe("Нет интернета — проверь подключение");
     expect(errorText("url")).toBe("По этому адресу никто не отвечает");
     expect(errorText("model")).toBe("Такой модели нет — выбери из списка");
+    expect(errorText("paid")).toBe("Ключ верный, но модель платная — выбери модель с «:free» или пополни счёт");
     expect(errorText("???")).toBe("Что-то пошло не так — попробуй ещё раз");
+  });
+
+  it("какой сервис стоит сейчас", () => {
+    expect(llmKindOf({ type: "openai_compatible", base_url: "https://openrouter.ai/api/v1" })).toBe("openrouter");
+    expect(llmKindOf({ type: "openai_compatible", base_url: "https://api.groq.com/openai/v1" })).toBe("openai");
+    expect(llmKindOf({ type: "ollama", base_url: "http://127.0.0.1:11434" })).toBe("ollama_local");
+    expect(llmKindOf({ type: "ollama", base_url: "https://ollama.com" })).toBe("ollama_cloud");
   });
 
   it("выбранная модель есть в списке, даже если сервис назвал её иначе", () => {

@@ -34,7 +34,9 @@ def _models(ltype: str, body) -> list[str]:
         return []
     if ltype == "ollama":
         return [str(m.get("name") or m.get("model")) for m in body.get("models") or [] if isinstance(m, dict)]
-    return [str(m.get("id")) for m in body.get("data") or [] if isinstance(m, dict) and m.get("id")]
+    ids = [str(m.get("id")) for m in body.get("data") or [] if isinstance(m, dict) and m.get("id")]
+    # у OpenRouter сотни моделей — бесплатные (:free) наверх списка
+    return sorted(ids, key=lambda m: not m.endswith(":free"))
 
 
 def llm_check(ltype: str, base_url: str, api_key: str, model: str = "") -> dict:
@@ -64,7 +66,7 @@ def llm_check(ltype: str, base_url: str, api_key: str, model: str = "") -> dict:
     # коротким запросом к самой модели (1–2 токена)
     probe = _probe(ltype, base, key, model or (models[0] if models else ""))
     if probe:
-        return {"ok": False, "error": probe, "models": [] if probe == "key" else models}
+        return {"ok": False, "error": probe, "models": [] if probe == "key" else models}  # paid/model: список оставляем — выбрать другую
     return {"ok": True, "error": "", "models": models}
 
 
@@ -86,6 +88,8 @@ def _probe(ltype: str, base: str, key: str, model: str) -> str:
         return ""  # модель долго думает — ключ при этом принят
     if status in (401, 403):
         return "key"
+    if status == 402:
+        return "paid"  # ключ верный, но модель платная или на счёте пусто
     if status == 404:
         return "model"
     return ""

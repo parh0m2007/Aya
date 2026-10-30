@@ -34,7 +34,7 @@ from core.voice.live_audio import LiveAudio
 from core.reply import StreamFilter, detect_mood, parse_action
 from core.behavior.state import BehaviorState
 from core.behavior import proactive
-from core.llm.base import make_adapters, stream_llm, LLMError
+from core.llm.base import friendly_error, make_adapters, stream_llm, LLMError
 from core.llm import metrics as llm_metrics
 from core.prompting import build_history, build_system_prompt
 from core.safety import tools, gateway
@@ -55,8 +55,11 @@ async def _lifespan(_: FastAPI):
         bridge_tguser.BRIDGE.start()
         proactive.start()
         diary.start()
+        music.worker.WORKER.submit(music.system.recover_duck)  # прошлый раз закрылись посреди речи
     yield
     if not os.environ.get("AYA_DISABLE_TASKS"):
+        with contextlib.suppress(Exception):
+            music.in_worker(music.system.release_duck, timeout=3)
         if mcp_boot is not None:
             mcp_boot.join(timeout=10)  # не оставить сироту-сервер, запущенный после stop_all
         mcp.REGISTRY.stop_all()
@@ -143,12 +146,13 @@ state = BehaviorState()
 taskrunner.attach_state(state)
 CONFIG_FILE = Path.home() / ".aya" / "config.json"
 
-# новый человек: облачная Ollama и gemma4 — в мастере остаётся только вставить ключ
+# новый человек: бесплатная gemma4 на OpenRouter — в мастере остаётся только вставить ключ
+# (облачная Ollama с конца октября 2026 платная за каждый запрос)
 DEFAULT_CONFIG = {
     "llm": {
-        "type": "ollama",
-        "base_url": "https://ollama.com",
-        "model": "gemma4:31b-cloud",
+        "type": "openai_compatible",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "google/gemma-4-31b-it:free",
         "api_key": "",
     }
 }
@@ -180,12 +184,12 @@ async def chat(body: ChatIn):
         db.add_message("aya", NO_MODEL_REPLY, "calm")
         return {"reply": NO_MODEL_REPLY, **state.snapshot()}
 
-    system = build_system_prompt(state.snapshot()) + "\n\n" + gateway.build_tool_instructions()
+    system = build_system_prompt(state.snapshot(), tools=gateway.build_tool_instructions())
     history = build_history()
     try:
         raw = "".join([c async for c in stream_llm(adapters, system, history)])
     except Exception as e:
-        reply = f"Ошибка LLM: {e}"
+        reply = friendly_error(str(e))
         db.add_message("aya", reply, "calm")
         return {"reply": reply, **state.snapshot()}
 
@@ -437,7 +441,7 @@ async def chat_stream(body: ChatIn):
 
         return StreamingResponse(no_model(), media_type="application/x-ndjson")
 
-    system = build_system_prompt(state.snapshot()) + "\n\n" + gateway.build_tool_instructions()
+    system = build_system_prompt(state.snapshot(), tools=gateway.build_tool_instructions())
     history = build_history()
     if files and history and history[-1].get("role") == "user":
         # содержимое файлов — только в этот ход; в истории остаётся короткая метка
@@ -500,10 +504,10 @@ async def chat_stream(body: ChatIn):
                         yield ev
         except Exception as e:
             err_text = str(e)
-            yield json.dumps({"error": err_text}, ensure_ascii=False) + "\n"
+            yield json.dumps({"error": friendly_error(err_text)}, ensure_ascii=False) + "\n"
 
         if err_text:
-            reply = f"Ошибка LLM: {err_text}"
+            reply = friendly_error(err_text)
         else:
             raw = "".join(parts)
             action, _tail = ({"name": "music", "args": quick}, "") if quick else parse_action(raw)
@@ -1864,6 +1868,7 @@ async def setup_fish_check(body: SetupFishIn):
 SETUP_LINKS = {
     "ollama_keys": "https://ollama.com/settings/keys",
     "fish_keys": "https://fish.audio/app/api-keys/",
+    "openrouter_keys": "https://openrouter.ai/settings/keys",
 }
 
 

@@ -3,7 +3,7 @@
    любой необязательный шаг можно пропустить. Шаг запоминается в ядре. */
 import { hotkeyField } from "./hotkey-field";
 import { TTS_VOICES } from "./cards";
-import { STEPS, errorText, llmPreset, modelOptions, type LlmKind } from "./setup-logic";
+import { STEPS, errorText, llmKindOf, llmPreset, modelOptions, type LlmKind } from "./setup-logic";
 import { CORE, el, esc, fetchJson, icon, postJson, toast } from "./ui";
 
 type SetupState = { done: boolean; step: number; llm: { type: string; base_url: string; model: string; api_key_set: boolean }; fish_key_set: boolean };
@@ -107,31 +107,32 @@ export async function openSetup(): Promise<void> {
   /* ── шаг 1: модель для ответов ── */
   const stepModel = () => {
     const w = el("div", "setup-step");
-    let kind: LlmKind = st.llm.type === "openai_compatible" ? "openai" : /127\.0\.0\.1|localhost/.test(st.llm.base_url) ? "ollama_local" : "ollama_cloud";
+    // облачная Ollama стала платной — у кого она стояла, предлагаем бесплатный OpenRouter
+    const actual = llmKindOf(st.llm);
+    let kind: LlmKind = actual === "ollama_cloud" ? "openrouter" : actual;
+    const keySaved = (k: LlmKind) => st.llm.api_key_set && k === actual;
     const p = llmPreset(kind);
-    const form = { type: p.type as string, base_url: st.llm.base_url || p.base_url, model: st.llm.model || p.model, api_key: "" };
+    const mine = kind === actual;
+    const form = { type: p.type as string, base_url: (mine && st.llm.base_url) || p.base_url, model: (mine && st.llm.model) || p.model, api_key: "" };
     w.innerHTML = `
       <h3>Где Ая будет думать</h3>
-      <p class="dim">По умолчанию — бесплатная облачная модель gemma4 на ollama.com. Нужен только ключ.</p>
+      <p class="dim">По умолчанию — бесплатная модель gemma4 на OpenRouter. Нужен только ключ, карта не нужна.</p>
       <div class="card setup-card">
-        <label class="setup-label">Ключ ollama.com</label>
-        <input class="inp" id="llm-key" type="password" autocomplete="off" placeholder="${st.llm.api_key_set ? "ключ сохранён — вставь новый, чтобы заменить" : "вставь ключ сюда"}">
+        <label class="setup-label" id="llm-key-label">Ключ OpenRouter</label>
+        <input class="inp" id="llm-key" type="password" autocomplete="off">
         <div class="setup-status" id="llm-status"></div>
-        <details class="setup-how" open>
+        <details class="setup-how" id="llm-how" open>
           <summary>Где взять ключ</summary>
-          <ol>
-            <li>Нажми «Открыть страницу ключей» и войди на ollama.com (можно через Google).</li>
-            <li>Нажми <b>Add API Key</b>, придумай любое имя.</li>
-            <li>Скопируй ключ и вставь в поле выше — проверю сама.</li>
-          </ol>
+          <ol id="llm-how-list"></ol>
           <button class="top-btn" id="llm-open">Открыть страницу ключей</button>
         </details>
       </div>
-      <details class="setup-more" id="llm-more">
+      <details class="setup-more" id="llm-more"${kind === "openrouter" ? "" : " open"}>
         <summary>Другая модель</summary>
         <div class="card setup-card">
           <div class="seg-row setup-seg" id="llm-kind">
-            <button class="seg" data-k="ollama_cloud">Ollama в облаке</button>
+            <button class="seg" data-k="openrouter">OpenRouter (бесплатно)</button>
+            <button class="seg" data-k="ollama_cloud">Ollama в облаке (платно)</button>
             <button class="seg" data-k="ollama_local">Ollama на этом компьютере</button>
             <button class="seg" data-k="openai">Сервис, совместимый с OpenAI</button>
           </div>
@@ -155,7 +156,35 @@ export async function openSetup(): Promise<void> {
       msel.innerHTML = opts.map((m) => `<option value="${esc(m)}"${m === form.model ? " selected" : ""}>${esc(m)}</option>`).join("");
       msel.hidden = !opts.length;
     };
-    const markKind = () => w.querySelectorAll<HTMLButtonElement>("#llm-kind button").forEach((b) => b.classList.toggle("active", b.dataset.k === kind));
+    const HOW: Partial<Record<LlmKind, { label: string; link: string; steps: string[] }>> = {
+      openrouter: {
+        label: "Ключ OpenRouter",
+        link: "openrouter_keys",
+        steps: [
+          "Нажми «Открыть страницу ключей» и войди на openrouter.ai (можно через Google).",
+          "Нажми <b>Create API Key</b>, придумай любое имя, остальное не трогай.",
+          "Скопируй ключ (начинается с <b>sk-or-</b>) и вставь в поле выше — проверю сама.",
+          "Бесплатно — 50 ответов в день. Хватит на обычный день разговоров.",
+        ],
+      },
+      ollama_cloud: {
+        label: "Ключ ollama.com",
+        link: "ollama_keys",
+        steps: [
+          "Облачные модели Ollama платные: нужен тариф или деньги на счёте.",
+          "Нажми «Открыть страницу ключей», затем <b>Add API Key</b>.",
+          "Скопируй ключ и вставь в поле выше — проверю сама.",
+        ],
+      },
+    };
+    const markKind = () => {
+      w.querySelectorAll<HTMLButtonElement>("#llm-kind button").forEach((b) => b.classList.toggle("active", b.dataset.k === kind));
+      const how = HOW[kind];
+      w.querySelector<HTMLElement>("#llm-key-label")!.textContent = how?.label ?? "Ключ";
+      w.querySelector<HTMLElement>("#llm-how")!.hidden = !how;
+      w.querySelector<HTMLElement>("#llm-how-list")!.innerHTML = (how?.steps ?? []).map((s) => `<li>${s}</li>`).join("");
+      key.placeholder = !llmPreset(kind).needsKey ? "ключ не нужен" : keySaved(kind) ? "ключ сохранён — вставь новый, чтобы заменить" : "вставь ключ сюда";
+    };
     url.value = form.base_url;
     mtxt.value = "";
     fillModels([]);
@@ -168,7 +197,7 @@ export async function openSetup(): Promise<void> {
       form.base_url = url.value.trim() || form.base_url;
       form.model = mtxt.value.trim() || msel.value || form.model;
       form.api_key = key.value.trim();
-      if (llmPreset(kind).needsKey && !form.api_key && !st.llm.api_key_set) {
+      if (llmPreset(kind).needsKey && !form.api_key && !keySaved(kind)) {
         status.textContent = "";
         return;
       }
@@ -187,7 +216,10 @@ export async function openSetup(): Promise<void> {
     };
     key.addEventListener("paste", later);
     key.addEventListener("input", later);
-    w.querySelector("#llm-open")!.addEventListener("click", () => void postJson("/api/setup/open", { target: "ollama_keys" }).catch(() => toast("Открой ollama.com/settings/keys в браузере")));
+    w.querySelector("#llm-open")!.addEventListener("click", () => {
+      const target = HOW[kind]?.link ?? "openrouter_keys";
+      void postJson("/api/setup/open", { target }).catch(() => toast(target === "ollama_keys" ? "Открой ollama.com/settings/keys в браузере" : "Открой openrouter.ai/settings/keys в браузере"));
+    });
     w.querySelector("#llm-check")!.addEventListener("click", () => void check());
     msel.addEventListener("change", () => {
       mtxt.value = "";
@@ -202,7 +234,6 @@ export async function openSetup(): Promise<void> {
         mtxt.value = "";
         fillModels([]);
         markKind();
-        key.placeholder = np.needsKey ? "вставь ключ сюда" : "ключ не нужен";
         llmOk = false;
         refreshNav();
         if (!np.needsKey) void check();

@@ -112,6 +112,62 @@ def test_duck_lowers_and_restores_volume(monkeypatch, db_reset):
     assert abs(s.SimpleAudioVolume.v - 0.8) < 1e-6
 
 
+def _sess(name: str, pid: int, v: float = 0.8):
+    class Vol:
+        def __init__(self):
+            self.v = v
+
+        def GetMasterVolume(self):
+            return self.v
+
+        def SetMasterVolume(self, nv, _ctx):
+            self.v = nv
+
+    class Proc:
+        def __init__(self):
+            self.pid = pid
+
+        def name(self):
+            return name
+
+    class Sess:
+        def __init__(self):
+            self.SimpleAudioVolume = Vol()
+            self.Process = Proc()
+
+    return Sess()
+
+
+def test_duck_leaves_other_apps_alone(monkeypatch, db_reset):
+    """Тестеры: Ая приглушала звонок в Discord и игру. Тише делаем только музыку."""
+    db.set_setting("music_duck", "lower")
+    ss = {n: _sess(n, i) for i, n in enumerate(["Discord.exe", "game.exe", "Spotify.exe", "chrome.exe", "Яндекс Музыка.exe"])}
+    monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: list(ss.values()))
+    system._DUCK.update(reasons=set(), volumes={}, paused=None)
+    system.duck(True, "aya")
+    low = {n for n, s in ss.items() if s.SimpleAudioVolume.v < 0.5}
+    assert low == {"Spotify.exe", "chrome.exe", "Яндекс Музыка.exe"}
+    system.duck(False, "aya")
+    assert all(abs(s.SimpleAudioVolume.v - 0.8) < 1e-6 for s in ss.values())
+
+
+def test_duck_restored_after_crash(monkeypatch, db_reset):
+    """Ядро упало посреди речи — Windows запомнила бы тихую громкость навсегда.
+    При следующем запуске возвращаем как было."""
+    db.set_setting("music_duck", "lower")
+    s = _sess("chrome.exe", 7)
+    monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: [s])
+    system._DUCK.update(reasons=set(), volumes={}, paused=None)
+    system.duck(True, "aya")
+    assert s.SimpleAudioVolume.v < 0.5
+    system._DUCK.update(reasons=set(), volumes={}, paused=None)  # «перезапуск»: память потеряна
+    system.recover_duck()
+    assert abs(s.SimpleAudioVolume.v - 0.8) < 1e-6
+    assert db.setting("music_duck_saved", "") == ""
+    system.recover_duck()  # повторно — ничего не трогает
+    assert abs(s.SimpleAudioVolume.v - 0.8) < 1e-6
+
+
 def test_duck_off_mode_does_nothing(monkeypatch, db_reset):
     db.set_setting("music_duck", "off")
     monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: pytest.fail("не должен трогать громкость"))
