@@ -95,6 +95,25 @@ def _default_browser() -> tuple[str, str]:
     return default_browser()
 
 
+def _open_url(url: str) -> None:
+    """Ссылку — прямо браузеру, без cmd: там «&» обрезал адрес и запускал хвост как команду."""
+    exe = _default_browser()[0]
+    if exe:
+        try:
+            subprocess.Popen([exe, url], shell=False)
+            return
+        except OSError:
+            pass
+    os.startfile(url)  # noqa: S606 — оболочка Windows открывает http(s) браузером
+
+
+def _speakers_volume():
+    """Громкость динамиков по умолчанию (IAudioEndpointVolume через pycaw)."""
+    from pycaw.pycaw import AudioUtilities
+
+    return AudioUtilities.GetSpeakers().EndpointVolume
+
+
 def allowed_folder() -> str:
     return db.setting("allowed_folder", "")
 
@@ -287,10 +306,14 @@ def run_action(name: str, args: dict) -> str:
         extra = [str(a) for a in (args.get("args") or [])][:4]
         if target:
             # target приоритет: URL или путь к exe
-            if "://" in target or target.startswith("www."):
-                subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
-                db.log_event("tool", f"open url {target[:60]}")
-                return f"открыла {target[:70]}"
+            if "://" in target or target.lower().startswith("www."):
+                url = target if "://" in target else "https://" + target
+                if not re.match(r"https?://", url, re.IGNORECASE):
+                    db.log_audit(name, str(args), "not a web link", False)
+                    return "открываю только веб-ссылки (http:// или https://)"
+                _open_url(url)
+                db.log_event("tool", f"open url {url[:60]}")
+                return f"открыла {url[:70]}"
             if re.fullmatch(r"[A-Za-z]:\\.*", target) or target.lower().endswith(".exe"):
                 if not os.path.isfile(target):
                     db.log_audit(name, str(args), "target not found", False)
@@ -367,17 +390,22 @@ def run_action(name: str, args: dict) -> str:
         except (TypeError, ValueError):
             level = 50
         level = max(0, min(100, level))
-        import ctypes
+        from ..music.worker import in_worker
 
-        VK_UP, VK_DOWN = 0xAF, 0xAE
-        key, presses = (VK_UP, level // 2) if level >= 50 else (VK_DOWN, (100 - level) // 50 * -1)
-        presses = abs(presses) if level != 0 else 50
-        if level == 0:
-            key, presses = VK_DOWN, 50
-        for _ in range(presses):
-            ctypes.windll.user32.keybd_event(key, 0, 0, 0)
-            ctypes.windll.user32.keybd_event(key, 0, 2, 0)
-        return f"volume adjusted toward {level}"
+        def apply():
+            # громкость динамиков ровно в процентах; раньше жали клавиши громкости
+            # от текущего уровня — «30» убавляло на 2%, «50» прибавляло 50%
+            vol = _speakers_volume()
+            vol.SetMasterVolumeLevelScalar(level / 100, None)
+            vol.SetMute(level == 0, None)
+
+        try:
+            in_worker(apply, timeout=10)  # COM громкости — в потоке, где он инициализирован
+        except Exception as e:  # noqa: BLE001
+            db.log_audit(name, str(args), f"volume error: {str(e)[:40]}", False)
+            return f"не получилось поменять громкость: {str(e)[:120]}"
+        db.log_event("tool", f"volume {level}%")
+        return f"громкость {level}%"
 
 
     if name == "create_note":

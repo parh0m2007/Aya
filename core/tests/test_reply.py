@@ -62,3 +62,11 @@ def test_detect_mood():
 
 def test_detect_mood_short_words_whole():
     assert detect_mood("Того много, кого нет.") == "calm"
+
+
+def test_detect_mood_short_words_alone():
+    """Короткие слова не определялись вовсе: в шаблоне вместо \b стоял символ backspace."""
+    assert detect_mood("Ого") == "surprise"
+    assert detect_mood("Вау, круто") == "surprise"
+    assert detect_mood("Ура") == "joyful"
+    assert detect_mood("Хм, не уверена.") == "thoughtful"

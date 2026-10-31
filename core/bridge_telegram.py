@@ -1,6 +1,7 @@
 """Мост Telegram: long-polling getUpdates → локальный /api/chat → sendMessage.
 
-Конфиг в core/config.json:
+Конфиг в ~/.aya/config.json (раньше — core/config.json в папке установки,
+его обновление стирало; старые настройки подхватываются оттуда):
 {
   "telegram": {"token": "123:...", "chat_id": "12345", "enabled": true}
 }
@@ -21,15 +22,34 @@ MAX_LEN = 3500
 
 
 def config_path() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    return os.path.join(os.path.expanduser("~"), ".aya", "config.json")
+
+
+LEGACY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+
+def _read(path: str) -> dict:
+    """{} — файла нет; битый JSON — ValueError (такой файл перезаписывать нельзя)."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _section() -> dict:
+    try:
+        tg = _read(config_path()).get("telegram")
+        if not tg:
+            tg = _read(LEGACY_PATH).get("telegram")
+    except (OSError, ValueError):
+        tg = None
+    return tg if isinstance(tg, dict) else {}
 
 
 def load_tg_config() -> dict:
-    try:
-        with open(config_path(), encoding="utf-8") as f:
-            cfg = (json.load(f) or {}).get("telegram") or {}
-    except (OSError, ValueError):
-        cfg = {}
+    cfg = _section()
     return {
         "token": str(cfg.get("token", "")),
         "chat_id": str(cfg.get("chat_id", "")),
@@ -38,15 +58,14 @@ def load_tg_config() -> dict:
 
 
 def save_tg_config(token: str, chat_id: str, enabled: bool) -> None:
+    """Пустой token — оставить сохранённый (консоль не присылает токен, если поле пустое)."""
     path = config_path()
-    try:
-        with open(path, encoding="utf-8") as f:
-            cfg = json.load(f)
-    except (OSError, ValueError):
-        cfg = {}
+    cfg = _read(path)  # битый файл — ValueError: общий конфиг (модель, ключи) не затираем
+    token = token or load_tg_config()["token"]
     cfg["telegram"] = {"token": token, "chat_id": chat_id, "enabled": enabled}
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
 

@@ -70,9 +70,46 @@ def test_report_task_runner_still_running(conftest_ws):
     db.set_task_status(tid, "running", "выполняется")
     tasks._run_task(tid, "report", {"agent": "Писец"})
     rows = db.query("SELECT status, due_at FROM tasks WHERE id=?", (tid,))
-    status = rows[0][0]
-    assert status == "pending", "задача должна остаться в очереди"
-    assert rows[0][1] > time.time() - 1, "из-за повторного срока"
+    # статус не трогаем: суб-агент мог как раз дописать «done», его нельзя затереть
+    assert rows[0][0] == "running"
+    assert rows[0][1] > time.time() + 30, "отложено на минуту"
+
+
+def _sync(fn, *args):
+    fn(*args)
+
+
+def test_scheduler_delivers_finished_report(db_reset):
+    """Суб-агент сам ставит своей задаче running/done — планировщик всё равно должен её подхватить."""
+    tid = db.add_task("report", {"agent": "Писец"}, time.time() - 1)
+    db.set_task_status(tid, "done", "всё собрано: 3 файла")
+    assert tid in tasks.tick(spawn=_sync)
+    assert db.setting("initiative_force", "").startswith("report:")
+    assert db.query("SELECT status FROM tasks WHERE id=?", (tid,))[0][0] == "reported"
+
+
+def test_scheduler_waits_for_running_report(db_reset):
+    tid = db.add_task("report", {"agent": "Писец"}, time.time() - 1)
+    db.set_task_status(tid, "running", "выполняется")
+    assert tid in tasks.tick(spawn=_sync)
+    assert db.setting("initiative_force", "") == ""
+    assert tid not in tasks.tick(spawn=_sync), "до нового срока не трогаем"
+
+
+def test_scheduler_skips_task_already_in_progress(db_reset, monkeypatch):
+    """Дайджест думает дольше 15 с — следующий проход не должен запускать его второй раз."""
+    tid = db.add_task("digest", {}, time.time() - 1)
+    started = []
+    assert tasks.tick(spawn=lambda fn, *a: started.append(a)) == [tid]
+    assert tasks.tick(spawn=lambda fn, *a: started.append(a)) == []
+    assert len(started) == 1
+
+
+def test_initiative_report_survives_model_failure(client):
+    """Модель недоступна — отчёт всё равно доходит, а не «Тут как-то тихо стало…»."""
+    db.set_setting("initiative_force", "report:Отчёт фонового суб-агента «Писец»: всё собрано, 3 файла")
+    reply = client.get("/api/initiative").json()["reply"]
+    assert "всё собрано" in reply
 
 
 def test_discord_config_roundtrip(monkeypatch, tmp_path):
@@ -85,6 +122,15 @@ def test_discord_config_roundtrip(monkeypatch, tmp_path):
     st = bridge_discord.BRIDGE.status()
     assert st["enabled"] is True and st["has_token"] is True
     assert st["running"] is False  # в тестах не стартует реальный клиент
+
+
+def test_discord_save_without_token_keeps_saved_one(monkeypatch, tmp_path):
+    from core import bridge_discord
+
+    monkeypatch.setattr(bridge_discord, "config_path", lambda: str(tmp_path / "config.json"))
+    bridge_discord.save_config("tok123", "555", True)
+    bridge_discord.save_config("", "777", False)
+    assert bridge_discord.load_config() == {"token": "tok123", "channel_id": "777", "enabled": False}
 
 
 def test_discord_api_endpoints(client, monkeypatch, tmp_path):

@@ -64,9 +64,18 @@ class BehaviorState:
             if random.random() < 0.05 and self.attention != "user" and time.time() - getattr(self, "_mood_set_at", 0) > 120:
                 self.mood = random.choices(MOODS, weights=[0.6, 0.25, 0.15])[0]
 
-    def initiative_check(self, now: float | None = None) -> str:
+    def initiative_check(self, now: float | None = None, requested_only: bool = False) -> str:
+        """requested_only — «Ая сама заговаривает» выключено: только то, что человек
+        попросил сам (напоминание, отчёт фонового суб-агента)."""
         now = time.time() if now is None else now
         forced = db.setting("initiative_force", "")
+        if requested_only:
+            if not forced.startswith(("reminder:", "report:")):
+                return ""
+            db.set_setting("initiative_force", "")
+            with self._lock:
+                self._last_initiative = now
+            return forced
         if forced.startswith("tg:retry:"):
             # отложенный повтор недоставленных писем: ждём, маркер не сбрасываем
             try:

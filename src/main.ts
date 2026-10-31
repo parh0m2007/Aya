@@ -27,8 +27,10 @@ import { accelLabel, rebind } from "./hotkey";
 import { startUpdateChecks } from "./updater";
 import { dropWhenHidden, Endpointer, matchWake, speechLevel, wakeNames } from "./voice-logic";
 import { gameVoiceMode, listensAlways, rendersNow } from "./game-mode";
-import { clampFollowupSec, FollowUpWindow, shouldArmFollowUp } from "./followup";
+import { clampFollowupSec, FollowUpWindow, shouldArmFollowUp, shouldArmWakeWindow } from "./followup";
 import { shouldToast, toastBody } from "./notify-decision";
+import { initiativeDelivery, initiativeQuery } from "./initiative-logic";
+import { previewArgs } from "./action-preview";
 import { notifyAya } from "./notify";
 import { setTrayCheck, onTrayToggle, type TrayCheck } from "./tray";
 import { initWindowState, isAyaHidden } from "./window-state";
@@ -276,10 +278,7 @@ function actionCard(p: PendingAction) {
   title.textContent = (TOOL_LABELS[p.tool] || p.tool) + " — разрешить?";
   const preview = document.createElement("pre");
   preview.className = "ac-preview";
-  preview.textContent =
-    Object.entries(p.args)
-      .map(([k, v]) => `${k}: ${String(v).slice(0, 300)}`)
-      .join("\n") || "(без аргументов)";
+  preview.textContent = previewArgs(p.args);
   const btns = document.createElement("div");
   btns.className = "ac-btns";
   const ok = document.createElement("button");
@@ -490,8 +489,8 @@ async function sendToAya(text: string, voice = false, attachments: string[] = []
   await loadFollowupConfig();
   // За время await могла начаться инициатива, новый ход или настройку выключили.
   if (myTurn !== turnSeq || speakAbort || busy || pendingId || speakPlaying) return;
-  // после ответа на «Ая, …» можно продолжить без имени
-  if (wakeOn && voiceMode !== "auto") armWakeWindow(7000);
+  // после ответа на «Ая, …» можно продолжить без имени — если включены «свободные руки»
+  if (shouldArmWakeWindow({ wakeOn, followupOn, mode: voiceMode })) armWakeWindow(7000);
   if (
     !shouldArmFollowUp({
       enabled: followupOn,
@@ -1492,26 +1491,39 @@ let focusOn = false;
 let lastTrayFollowup: boolean | null = null;
 let lastTrayFocus: boolean | null = null;
 
+/** Напоминание пришло посреди разговора: не перебиваем, но и не теряем. */
+function deliverQuiet(text: string) {
+  addMsg(text, "aya initiative");
+  void notifyAya(toastBody(text));
+}
+
 async function pollInitiative() {
-  if (!initiativeOn || busy || gameOn) return; // в игре сама не заговаривает
+  // инициатива выключена — всё равно спрашиваем: напоминания человек просил сам
+  if (busy || gameOn) return; // в игре сама не заговаривает
   if (rec && rec.state === "recording") return;
   if (Date.now() < initiativeCool) return;
   const myTurn = turnSeq;
+  const recording = () => !!(rec && rec.state === "recording");
   try {
-    const d = (await (await fetch(`${CORE_URL}/api/initiative`)).json()) as {
+    const d = (await (await fetch(`${CORE_URL}/api/initiative${initiativeQuery(initiativeOn)}`)).json()) as {
       topic?: string;
       reply?: string;
       mood?: string;
     };
     if (!d.topic || !d.reply) return;
-    if (!initiativeOn || myTurn !== turnSeq || busy || (rec && rec.state === "recording")) return;
+    const topic = d.topic;
+    const how = initiativeDelivery(topic, initiativeOn, myTurn !== turnSeq || busy || recording());
+    if (how === "drop") return;
+    if (how === "quiet") return deliverQuiet(d.reply);
 
     // Инициатива — самостоятельный ход: она инвалидирует ожидание свободных
     // рук после предыдущего голосового ответа и не должна перебивать новый ход.
     const initiativeTurn = ++turnSeq;
     cancelFollowup(true);
     const hidden = await isAyaHidden();
-    if (!initiativeOn || initiativeTurn !== turnSeq || busy || (rec && rec.state === "recording")) return;
+    const howNow = initiativeDelivery(topic, initiativeOn, initiativeTurn !== turnSeq || busy || recording());
+    if (howNow === "drop") return;
+    if (howNow === "quiet") return deliverQuiet(d.reply);
     if (shouldToast(hidden, focusOn)) {
       void notifyAya(toastBody(d.reply));
     }
@@ -1525,8 +1537,9 @@ async function pollInitiative() {
     try {
       startMouth();
       const buf = await (await fetch(speakUrl(CORE_URL, d.reply, d.mood || "calm"))).arrayBuffer();
-      // Пока грузился TTS, мог начаться текст/голосовой ход — не перебиваем его.
-      if (!initiativeOn || initiativeTurn !== turnSeq || busy || (rec && rec.state === "recording")) return;
+      // Пока грузился TTS, мог начаться текст/голосовой ход — не перебиваем его
+      // (текст уже в чате и в пузыре).
+      if (initiativeDelivery(topic, initiativeOn, initiativeTurn !== turnSeq || busy || recording()) !== "full") return;
       ensureGainCtx();
       speakAbort = false;
       await playTtsBuffer(buf);

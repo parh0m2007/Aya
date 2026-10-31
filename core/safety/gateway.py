@@ -218,13 +218,12 @@ async def dispatch(action: dict):  # str | dict(pending)
     if name in CONFIRM_TOOLS:
         if name == "write_allowed_file":
             path = tools.resolve_allowed_path(args)
-            if not (isinstance(path, str) and os.path.isabs(path) and os.path.exists(path)):
-                # нет валидного пути —_run_action вернёт строку-ошибку
-                result = tools.run_action(name, args)
-                tools.db.log_audit(name, str(args), str(result)[:60], False)
-                return result
-            if not os.path.isfile(path):
+            if not (isinstance(path, str) and os.path.isabs(path)):
+                tools.db.log_audit(name, str(args), str(path)[:60], False)
+                return path  # строка-ошибка: имя или папка не годятся
+            if os.path.exists(path) and not os.path.isfile(path):
                 return "путь занят не файлом"
+            # и новый файл, и перезапись — только после подтверждения (или в доверенном режиме)
         if tools.confirm_mode() == "auto":
             # доверенный режим: пользователь дал полное разрешение — выполняем сразу
             result = await _run(name, args)

@@ -910,11 +910,10 @@ async def speak_live(text: str, mood: str = "calm", vid_override: str = ""):
             r = await _fish_speak(text, vid, on_chunk=live.push)
             if r and r[0]:
                 path = r[0]
+                _index_put(key, path)  # в кэш — только голос Fish, не запасной
             elif not live.chunks:
                 r = await _cloud_fallback(text)
                 path = r[0] if r else None
-            if path:
-                _index_put(key, path)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -961,22 +960,30 @@ async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: boo
         _svc.tts_record(vid, True, (_time.perf_counter() - t0) * 1000)
         return hit, 1
     r = None
+    # в кэш — только звук своим голосом: запасной (Edge, другой движок) иначе
+    # оставался бы голосом этой фразы навсегда, даже когда свой голос заработает
+    primary = False
     if vid in FISH_VOICES:
         r = await _fish_speak(text, vid)
+        primary = r is not None
         if r is None:
             r = await _cloud_fallback(text)
     if r is None and game:
         pass  # в игре — только облако и Edge, локальные движки ниже не трогаем
     elif r is None and is_f5_ref(vid):
         r = await _f5_real(text, vid, mood, nfe)
+        primary = r is not None
         if r is None:
             r = await _f5_speak(text, mood, nfe)
     elif r is None and vid == "cute":
         r = await _f5_speak(text, mood, nfe)
+        primary = r is not None
     elif r is None and vid in QWEN_REFS:
         r = await _qwen_speak(text, vid)
+        primary = r is not None
     elif r is None and vid in VITS_VOICES:
         r = await _vits_speak(text, mood, VITS_VOICES[vid])
+        primary = r is not None
     if r is None and not game and not is_f5_ref(vid):
         r = await _f5_real(text, "f3", mood, nfe)
     if r is None and not game:
@@ -988,7 +995,7 @@ async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: boo
         r = r[0], 0
     from ..llm import metrics as _svc
 
-    if r and r[0]:
+    if r and r[0] and primary:
         _index_put(key, r[0])
     _svc.tts_record(vid, bool(r and r[1]), (_time.perf_counter() - t0) * 1000)
     return r

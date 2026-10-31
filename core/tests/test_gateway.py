@@ -30,12 +30,28 @@ def test_permission_gate(db_reset):
     assert not os.path.exists(os.path.join(WS, "a.md"))
 
 
-def test_write_new_direct_confirm(db_reset):
+def test_write_new_file_needs_confirm(db_reset):
+    """Новый файл тоже только после «Выполнить» (раньше писался сразу, а в журнал шло «отказ»)."""
     tools.allow_tool("write_allowed_file", True)
-    res = _run({"name": "write_allowed_file", "args": {"name": "new.md", "content": "hello"}})
-    assert res == "записано: new.md"
-    with open(os.path.join(WS, "new.md"), encoding="utf-8") as f:
+    p = os.path.join(WS, "new-confirm.md")
+    if os.path.exists(p):
+        os.remove(p)
+    res = _run({"name": "write_allowed_file", "args": {"name": "new-confirm.md", "content": "hello"}})
+    assert isinstance(res, dict) and "confirm_id" in res
+    assert not os.path.exists(p)
+    conf = gateway.resolve_confirm(res["confirm_id"], True)
+    assert conf["applied"] is True
+    with open(p, encoding="utf-8") as f:
         assert f.read() == "hello"
+
+
+def test_write_new_file_trusted_mode_writes_at_once(db_reset):
+    tools.allow_tool("write_allowed_file", True)
+    db.set_setting("perm_mode", "auto")
+    res = _run({"name": "write_allowed_file", "args": {"name": "new-auto.md", "content": "hi"}})
+    assert res == "записано: new-auto.md"
+    row = db.query("SELECT allowed FROM audit_log WHERE tool='write_allowed_file' ORDER BY id DESC LIMIT 1")
+    assert row[0][0] == 1
 
 
 def test_overwrite_pending_confirm_flow(db_reset):

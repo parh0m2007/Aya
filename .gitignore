@@ -24,3 +24,5 @@ core/voice/f5_ru/refs_user/
 public/models/micu/
 scripts/private-words.txt
 .claude/
+# старое место настроек Telegram-бота (там мог лежать токен)
+core/config.json

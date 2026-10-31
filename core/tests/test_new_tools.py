@@ -69,9 +69,51 @@ def test_open_app_url(monkeypatch, conftest_ws):
     _enable("open_app")
     calls = []
     monkeypatch.setattr(tools.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(tools, "_default_browser", lambda: ("C:\\B\\chrome.exe", "chrome.exe"))
     res = tools.run_action("open_app", {"target": "https://duckduckgo.com"})
     assert "открыла" in res
-    assert calls and "start" in calls[0] and "https://duckduckgo.com" in calls[0]
+    assert calls == [["C:\\B\\chrome.exe", "https://duckduckgo.com"]]
+
+
+def test_open_url_with_ampersand_goes_to_browser_whole(monkeypatch, conftest_ws):
+    """Ссылка целиком уходит браузеру. Через cmd «&» обрезал адрес, а хвост запускался как команда."""
+    _enable("open_app")
+    calls = []
+    monkeypatch.setattr(tools.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(tools, "_default_browser", lambda: ("C:\\B\\chrome.exe", "chrome.exe"))
+    url = "https://www.youtube.com/watch?v=abc&t=90&calc"
+    assert "открыла" in tools.run_action("open_app", {"target": url})
+    assert calls == [["C:\\B\\chrome.exe", url]]
+
+
+def test_open_url_without_browser_skips_cmd(monkeypatch, conftest_ws):
+    _enable("open_app")
+    calls = []
+    monkeypatch.setattr(tools.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(os, "startfile", lambda p: calls.append(("startfile", p)))
+    monkeypatch.setattr(tools, "_default_browser", lambda: ("", ""))
+    tools.run_action("open_app", {"target": "https://x.com/?a=1&calc"})
+    assert calls == [("startfile", "https://x.com/?a=1&calc")]
+
+
+def test_open_url_www_gets_https(monkeypatch, conftest_ws):
+    _enable("open_app")
+    calls = []
+    monkeypatch.setattr(tools.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(tools, "_default_browser", lambda: ("C:\\B\\chrome.exe", "chrome.exe"))
+    tools.run_action("open_app", {"target": "www.example.com/a?b=1&c=2"})
+    assert calls == [["C:\\B\\chrome.exe", "https://www.example.com/a?b=1&c=2"]]
+
+
+def test_open_url_rejects_non_web_links(monkeypatch, conftest_ws):
+    """file:// и прочие схемы запускали бы программы с диска — открываем только сайты."""
+    _enable("open_app")
+    calls = []
+    monkeypatch.setattr(tools.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(os, "startfile", lambda p: calls.append(("startfile", p)))
+    res = tools.run_action("open_app", {"target": "file:///C:/Windows/System32/calc.exe"})
+    assert "только" in res
+    assert calls == []
 
 
 def test_open_browser_starts_default_browser_without_ads(monkeypatch, conftest_ws):
@@ -232,3 +274,46 @@ def test_delegate_cannot_run_cmd(conftest_ws):
 
     assert "run_cmd" in agents.DELEGATE_BLOCKED_TOOLS
     assert "ssh_run" in agents.DELEGATE_BLOCKED_TOOLS
+
+
+class _FakeVolume:
+    def __init__(self):
+        self.level = None
+        self.muted = None
+
+    def SetMasterVolumeLevelScalar(self, value, ctx):
+        self.level = value
+
+    def SetMute(self, value, ctx):
+        self.muted = value
+
+
+def test_set_volume_sets_exact_level(monkeypatch, conftest_ws):
+    """«Громкость 30» ставила не 30%, а убавляла на 2% (одно нажатие клавиши), «50» — прибавляла 50%."""
+    _enable("set_volume")
+    vol = _FakeVolume()
+    monkeypatch.setattr(tools, "_speakers_volume", lambda: vol)
+    res = tools.run_action("set_volume", {"level": 30})
+    assert vol.level == 0.3
+    assert vol.muted is False
+    assert "30" in res
+
+
+def test_set_volume_clamps(monkeypatch, conftest_ws):
+    _enable("set_volume")
+    vol = _FakeVolume()
+    monkeypatch.setattr(tools, "_speakers_volume", lambda: vol)
+    tools.run_action("set_volume", {"level": 250})
+    assert vol.level == 1.0
+    tools.run_action("set_volume", {"level": "громко"})
+    assert vol.level == 0.5
+
+
+def test_set_volume_reports_failure(monkeypatch, conftest_ws):
+    _enable("set_volume")
+
+    def broken():
+        raise OSError("нет звукового устройства")
+
+    monkeypatch.setattr(tools, "_speakers_volume", broken)
+    assert "не получилось" in tools.run_action("set_volume", {"level": 40})

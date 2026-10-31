@@ -134,7 +134,12 @@ def task_by_id(task_id: int):
 
 
 def due_tasks():
-    return query("SELECT id,due_at,kind,args FROM tasks WHERE status='pending' AND due_at<=?", (time.time(),))
+    # отчёт фонового суб-агента: его статус (running/done/error) ведёт сам суб-агент
+    return query(
+        "SELECT id,due_at,kind,args FROM tasks WHERE due_at<=? AND "
+        "(status='pending' OR (kind='report' AND status IN ('running','done','error')))",
+        (time.time(),),
+    )
 
 
 def cancel_task(task_id: int) -> bool:

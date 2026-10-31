@@ -37,6 +37,25 @@ def test_not_games():
     assert not gamemode.is_game(fg("aya.exe", fullscreen=True))
 
 
+
+MONITOR = (0, 0, 1920, 1080)
+
+
+def test_maximized_window_is_not_fullscreen():
+    """Панель задач скрывается сама — развёрнутое окно (Word, VS Code) накрывает весь
+    монитор и раньше считалось игрой: Ая пряталась и переставала слышать имя."""
+    assert not gamemode.covers_monitor((-8, -8, 1928, 1088), MONITOR, maximized=True, caption=True)
+
+
+def test_borderless_game_is_fullscreen():
+    assert gamemode.covers_monitor((0, 0, 1920, 1080), MONITOR, maximized=False, caption=False)
+    # игра без рамки, развёрнутая окном, — всё ещё игра
+    assert gamemode.covers_monitor((0, 0, 1920, 1080), MONITOR, maximized=True, caption=False)
+
+
+def test_small_window_is_not_fullscreen():
+    assert not gamemode.covers_monitor((100, 100, 900, 700), MONITOR, maximized=False, caption=True)
+
 def test_enters_after_two_samples_and_leaves_after_pause(gm):
     game = fg("cs2.exe", fullscreen=True)
     assert gamemode.update(game, now=100) == ""  # мелькнуло — ещё не игра

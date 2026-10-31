@@ -112,7 +112,7 @@ def _key_re(key: str) -> re.Pattern:
     if not key[0].isalpha():
         return re.compile(re.escape(key))
     # короткие слова — целиком («ого» не должно ловиться в «много»), длинные — по началу слова
-    tail = r"" if len(key) <= 3 else ""
+    tail = r"\b" if len(key) <= 3 else ""
     return re.compile(r"(?<![\w])" + re.escape(key) + tail)
 
 

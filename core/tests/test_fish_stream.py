@@ -155,3 +155,65 @@ def test_fish_cooldown_after_auth_error(db_reset):
     tts._fish_failed(402)
     assert not tts.fish_ready()
     tts._FISH_FAIL["until"] = 0.0
+
+
+def _cache_spy(monkeypatch, tmp_path):
+    puts = []
+    monkeypatch.setattr(tts, "_index_get", lambda key: None)
+    monkeypatch.setattr(tts, "_index_put", lambda key, path: puts.append(path))
+    edge = tmp_path / "edge.mp3"
+    edge.write_bytes(b"EDGE")
+    monkeypatch.setattr(tts, "_edge_speak", lambda text: (str(edge), 0))
+    return puts, str(edge)
+
+
+def test_fallback_voice_is_not_cached_as_fish(db_reset, monkeypatch, tmp_path):
+    """Fish один раз не ответил — фраза навсегда оставалась голосом Edge."""
+    puts, edge = _cache_spy(monkeypatch, tmp_path)
+
+    async def dead_fish(text, vid, on_chunk=None):
+        return None
+
+    monkeypatch.setattr(tts, "_fish_speak", dead_fish)
+    path, _ = asyncio.run(tts.speak("Хе-хе, приятно", "joyful", vid_override="fish_miyuki"))
+    assert path == edge
+    assert puts == []
+
+
+def test_fish_voice_is_cached(db_reset, monkeypatch, tmp_path):
+    puts, _edge = _cache_spy(monkeypatch, tmp_path)
+    fish = tmp_path / "fish.mp3"
+    fish.write_bytes(b"FISH")
+
+    async def ok_fish(text, vid, on_chunk=None):
+        return str(fish), 0
+
+    monkeypatch.setattr(tts, "_fish_speak", ok_fish)
+    asyncio.run(tts.speak("Хе-хе, приятно", "joyful", vid_override="fish_miyuki"))
+    assert puts == [str(fish)]
+
+
+def test_game_fallback_is_not_cached_as_local_voice(db_reset, monkeypatch, tmp_path):
+    """В игре локальный голос не грузится и говорит Edge — это не должно стать голосом фразы навсегда."""
+    puts, edge = _cache_spy(monkeypatch, tmp_path)
+    monkeypatch.setattr(tts, "_in_game", lambda: True)
+    path, _ = asyncio.run(tts.speak("Привет", "calm", vid_override="f3"))
+    assert path == edge
+    assert puts == []
+
+
+def test_live_fallback_is_not_cached_as_fish(db_reset, monkeypatch, tmp_path):
+    puts, edge = _cache_spy(monkeypatch, tmp_path)
+
+    async def dead_fish(text, vid, on_chunk=None):
+        return None
+
+    monkeypatch.setattr(tts, "_fish_speak", dead_fish)
+
+    async def run():
+        live = await tts.speak_live("Привет", "calm", vid_override="fish_miyuki")
+        await live.wait_closed()
+        return live.path
+
+    assert asyncio.run(run()) == edge
+    assert puts == []

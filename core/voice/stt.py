@@ -202,6 +202,12 @@ def status() -> dict:
     return {"model": size, "device": device, "loaded": _model is not None, "active_device": _info["device"], "error": _info["error"], "models": list(MODELS), "game": _game}
 
 
+def _bad_audio(e: Exception) -> bool:
+    """Запись не читается (PyAV): короткий щелчок кнопкой, оборванный webm.
+    Это «ничего не сказали», а не сбой распознавания и не сбой видеокарты."""
+    return type(e).__module__.split(".")[0] == "av"
+
+
 def transcribe(wav_bytes: bytes) -> str:
     import tempfile
 
@@ -213,6 +219,8 @@ def transcribe(wav_bytes: bytes) -> str:
             try:
                 text = _run(tmp)
             except Exception as e:  # noqa: BLE001
+                if _bad_audio(e):
+                    return ""
                 if _info.get("device") != "cuda":
                     raise
                 _cuda_failed(e)

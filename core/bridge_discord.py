@@ -34,12 +34,16 @@ def load_config() -> dict:
 
 
 def save_config(token: str, channel_id: str, enabled: bool) -> None:
+    """Пустой token — оставить сохранённый (консоль не присылает токен, если поле пустое)."""
     path = config_path()
     try:
         with open(path, encoding="utf-8-sig") as f:
             cfg = json.load(f)
-    except (OSError, ValueError):
+    except FileNotFoundError:
         cfg = {}
+    # битый JSON — ValueError наружу: общий конфиг (модель, ключи) не затираем
+    token = token or load_config()["token"]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     cfg["discord"] = {"token": token, "channel_id": channel_id, "enabled": enabled}
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:

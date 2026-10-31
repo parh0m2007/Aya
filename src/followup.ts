@@ -66,3 +66,9 @@ export function shouldArmFollowUp(d: ArmDecision): boolean {
     d.reply.trim().length > 0
   );
 }
+
+/** После ответа на «Ая, …» можно ещё 7 секунд говорить без имени — но только
+ *  при включённых «свободных руках»: выключил их — после ответа Ая не слушает. */
+export function shouldArmWakeWindow(d: { wakeOn: boolean; followupOn: boolean; mode: VoiceMode }): boolean {
+  return d.wakeOn && d.followupOn && d.mode !== "auto";
+}

@@ -135,6 +135,17 @@ class _MONITORINFO(ctypes.Structure):
     _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", _RECT), ("rcWork", _RECT), ("dwFlags", ctypes.c_ulong)]
 
 
+WS_CAPTION = 0x00C00000
+
+
+def covers_monitor(win: tuple, mon: tuple, maximized: bool, caption: bool) -> bool:
+    """Окно накрывает весь монитор (left, top, right, bottom). Развёрнутое окно с
+    заголовком — не игра: при автоскрытии панели задач оно тоже накрывает экран."""
+    if maximized and caption:
+        return False
+    return win[0] <= mon[0] and win[1] <= mon[1] and win[2] >= mon[2] and win[3] >= mon[3]
+
+
 def foreground_info() -> dict | None:
     """{exe, cls, fullscreen, d3d} активного окна или None."""
     if not hasattr(ctypes, "windll"):
@@ -156,7 +167,13 @@ def foreground_info() -> dict | None:
         full = False
         if mon and user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
             m = mi.rcMonitor
-            full = r.left <= m.left and r.top <= m.top and r.right >= m.right and r.bottom >= m.bottom
+            style = user32.GetWindowLongW(hwnd, -16)  # GWL_STYLE
+            full = covers_monitor(
+                (r.left, r.top, r.right, r.bottom),
+                (m.left, m.top, m.right, m.bottom),
+                maximized=bool(user32.IsZoomed(hwnd)),
+                caption=(style & WS_CAPTION) == WS_CAPTION,
+            )
         quns = ctypes.c_int(0)
         d3d = ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(quns)) == 0 and quns.value == 3
         return {"exe": _exe_name(user32, ctypes.windll.kernel32, hwnd), "cls": cls.value, "fullscreen": full, "d3d": d3d}
@@ -268,4 +285,4 @@ def stop() -> None:
             _leave()
 
 
-__all__ = ["active", "enabled", "is_game", "priority_targets", "set_priority", "start", "status", "stop", "update"]
+__all__ = ["active", "covers_monitor", "enabled", "is_game", "priority_targets", "set_priority", "start", "status", "stop", "update"]

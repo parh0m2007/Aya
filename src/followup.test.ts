@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampFollowupSec, FollowUpWindow, shouldArmFollowUp, type ArmDecision } from "./followup";
+import { clampFollowupSec, FollowUpWindow, shouldArmFollowUp, shouldArmWakeWindow, type ArmDecision } from "./followup";
 
 describe("clampFollowupSec", () => {
   it("зажимает диапазон 2–30", () => {
@@ -69,5 +69,20 @@ describe("shouldArmFollowUp", () => {
   });
   it("не взводится, если функция выключена", () => {
     expect(shouldArmFollowUp({ ...base, enabled: false })).toBe(false);
+  });
+});
+
+describe("shouldArmWakeWindow", () => {
+  it("«свободные руки» выключены — после ответа без имени не слушаем", () => {
+    expect(shouldArmWakeWindow({ wakeOn: true, followupOn: false, mode: "button" })).toBe(false);
+  });
+  it("«свободные руки» и отклик на имя включены — 7 секунд можно без имени", () => {
+    expect(shouldArmWakeWindow({ wakeOn: true, followupOn: true, mode: "hotkey" })).toBe(true);
+  });
+  it("без отклика на имя — нет окна", () => {
+    expect(shouldArmWakeWindow({ wakeOn: false, followupOn: true, mode: "button" })).toBe(false);
+  });
+  it("режим «по голосу» и так слушает всё", () => {
+    expect(shouldArmWakeWindow({ wakeOn: true, followupOn: true, mode: "auto" })).toBe(false);
   });
 });

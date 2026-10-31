@@ -45,6 +45,7 @@ from core import tasks as taskrunner
 @contextlib.asynccontextmanager
 async def _lifespan(_: FastAPI):
     mcp_boot = None
+    pomodoro.recover()  # прошлый запуск закрыли посреди фокуса — снимаем «Тишину»
     if not os.environ.get("AYA_DISABLE_TASKS"):
         taskrunner.start()
         # MCP-серверы (npx …) стартуют секунды — не держим ядро, пусть догоняют в фоне
@@ -677,10 +678,11 @@ def _init_prompt(topic: str, tg_items: list[dict] | None = None) -> str:
 
 
 @app.get("/api/initiative")
-async def initiative():
+async def initiative(requested_only: bool = False):
+    """requested_only — окно с выключенной инициативой: только напоминания и отчёты."""
     if gamemode.active():  # в игре сама не заговаривает (и маркеры отложенных писем не трогаем)
         return {"topic": "", "reply": "", **state.snapshot()}
-    topic = state.initiative_check()
+    topic = state.initiative_check(requested_only=True) if requested_only else state.initiative_check()
     out = {"topic": "", "reply": "", **state.snapshot()}
     if not topic:
         return out
@@ -724,7 +726,12 @@ async def initiative():
                 f"инициатива tg: не сгенерировалась ({gen_error or 'пустой ответ'}) — {len(tg_items)} писем ждут повтора",
             )
             return out
-        reply = INIT_FALLBACK.get(topic if topic in INIT_FALLBACK else "", INIT_FALLBACK["light_ping"]) if not topic.startswith("reminder:") else "Напоминание: " + topic.split(":", 1)[1]
+        if topic.startswith("reminder:"):
+            reply = "Напоминание: " + topic.split(":", 1)[1]
+        elif topic.startswith("report:"):
+            reply = topic.split(":", 1)[1][:600]  # модель молчит — отчёт отдаём как есть
+        else:
+            reply = INIT_FALLBACK.get(topic, INIT_FALLBACK["light_ping"])
     elif tg_items:
         bridge_tguser.drop_inbox(tg_items)  # доставлено — подтверждаем
         if bridge_tguser.peek_inbox(1):

@@ -8,6 +8,8 @@ httpx==0.28.1
 pydantic==2.14.1
 discord.py==2.7.1
 Telethon==1.45.0
+# SOCKS5-прокси для Telethon: без него прокси молча игнорируется
+python-socks[asyncio]==3.1.1
 pypdf==6.21.2
 python-multipart==0.0.32
 psutil==7.2.2

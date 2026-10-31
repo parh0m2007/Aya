@@ -137,6 +137,31 @@ def test_pomodoro_stop_restores_focus_and_tool(db_reset):
     pomodoro.stop()
 
 
+
+def test_pomodoro_restart_restores_focus(db_reset):
+    """Аю закрыли посреди фокуса: «Тишина» оставалась включённой навсегда."""
+    db.set_setting("focus_mode", "0")
+    pomodoro.start(25, 5, 4)
+    assert db.setting("focus_mode") == "1"
+    pomodoro._s.update(phase="idle", ends=0.0, prev_focus="0")  # новый запуск: память пуста
+    pomodoro.recover()
+    assert db.setting("focus_mode") == "0"
+
+
+def test_pomodoro_recover_keeps_manual_quiet(db_reset):
+    db.set_setting("focus_mode", "1")  # человек сам включил «Тишину», помодоро не было
+    pomodoro.recover()
+    assert db.setting("focus_mode") == "1"
+
+
+def test_pomodoro_recover_after_normal_stop_is_noop(db_reset):
+    db.set_setting("focus_mode", "0")
+    pomodoro.start(25, 5, 4)
+    pomodoro.stop()
+    db.set_setting("focus_mode", "1")  # потом «Тишину» включили руками
+    pomodoro.recover()
+    assert db.setting("focus_mode") == "1"
+
 def test_pomodoro_api(client, db_reset):
     r = client.post("/api/pomodoro", json={"action": "start", "focus": 1, "rest": 1, "rounds": 1}).json()
     assert r["phase"] == "focus"
@@ -214,3 +239,14 @@ def test_memory_search_stem_fallback(monkeypatch, db_reset):
     longmem.ingest("assistant", "Жил-был серый кот, который любил спать на клавиатуре и мурлыкать.", mid)
     res = longmem.search("котики")
     assert res and "кот" in res[0]["text"]
+
+
+def test_core_start_recovers_pomodoro(db_reset):
+    import core.main as main
+    from fastapi.testclient import TestClient
+
+    db.set_setting("focus_mode", "1")
+    db.set_setting("pomodoro_active", "1")
+    db.set_setting("pomodoro_prev_focus", "0")
+    with TestClient(main.app):
+        assert db.setting("focus_mode") == "0"

@@ -34,6 +34,25 @@ def _set_focus(on: bool) -> None:
     db.set_setting("focus_mode", "1" if on else "0")
 
 
+# Состояние помодоро живёт в памяти, а «Тишина» — в базе. Если Аю закрыли посреди
+# фокуса, «Тишина» оставалась включённой навсегда: запоминаем, что её включило
+# помодоро и какой она была до него, и при следующем запуске возвращаем.
+ACTIVE_KEY = "pomodoro_active"
+PREV_KEY = "pomodoro_prev_focus"
+
+
+def _mark(active: bool) -> None:
+    db.set_setting(ACTIVE_KEY, "1" if active else "0")
+
+
+def recover() -> None:
+    """Запуск ядра: прошлый помодоро не закончился — вернуть «Тишину» как было до него."""
+    if db.setting(ACTIVE_KEY, "0") != "1":
+        return
+    db.set_setting("focus_mode", "1" if db.setting(PREV_KEY, "0") == "1" else "0")
+    _mark(False)
+
+
 def _event(name: str) -> None:
     _s["seq"] += 1
     _s["event"] = name
@@ -44,6 +63,8 @@ def start(focus_min=25, break_min=5, rounds=4, now: float | None = None) -> dict
     with _lock:
         if _s["phase"] == "idle":
             _s["prev_focus"] = db.setting("focus_mode", "0")
+            db.set_setting(PREV_KEY, _s["prev_focus"])
+        _mark(True)
         _s.update(
             phase="focus",
             started=now,
@@ -65,6 +86,7 @@ def stop(now: float | None = None) -> dict:
             _s["phase"] = "idle"
             _s["ends"] = 0.0
             _set_focus(_s["prev_focus"] == "1")
+            _mark(False)
             _event("stop")
     return status(now)
 
@@ -77,6 +99,7 @@ def _advance(now: float) -> None:
                 _s["phase"] = "idle"
                 _s["ends"] = 0.0
                 _set_focus(_s["prev_focus"] == "1")
+                _mark(False)
                 _event("done")
                 return
             _s["phase"] = "break"

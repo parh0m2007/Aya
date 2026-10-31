@@ -1,6 +1,7 @@
 /* Общие помощники консоли. */
 
 import { CORE_URL } from "../persona";
+import { runGuarded } from "./guard";
 
 export const CORE = CORE_URL;
 
@@ -49,7 +50,16 @@ export function switchEl(checked: boolean, onChange: (v: boolean) => Promise<voi
   const input = document.createElement("input");
   input.type = "checkbox";
   input.checked = checked;
-  input.addEventListener("change", () => void onChange(input.checked));
+  input.addEventListener("change", async () => {
+    const want = input.checked;
+    await runGuarded(
+      () => onChange(want),
+      (msg) => {
+        input.checked = !want; // не сохранилось — переключатель возвращаем
+        sw.title = msg;
+      },
+    );
+  });
   sw.append(input, el("span", "slider"));
   return sw;
 }
@@ -58,8 +68,15 @@ export function actionBtn(text: string, onClick: (b: HTMLButtonElement) => Promi
   const b = el("button", cls, text) as HTMLButtonElement;
   b.addEventListener("click", async () => {
     b.disabled = true;
+    const label = b.innerHTML;
     try {
-      await onClick(b);
+      await runGuarded(
+        () => onClick(b),
+        (msg) => {
+          b.textContent = msg; // сбой видно прямо на кнопке пару секунд
+          window.setTimeout(() => (b.innerHTML = label), 2500);
+        },
+      );
     } finally {
       b.disabled = false;
     }
