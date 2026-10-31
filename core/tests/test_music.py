@@ -332,3 +332,134 @@ def test_track_end_is_not_user_action(db_reset):
     player.STATE["user_ts"] = 1.0
     player.command("ended")
     assert player.STATE["user_ts"] == 1.0
+
+
+# ── громкость музыки, а не всего компьютера ───────────────────────────
+
+
+def _vol_sess(name: str, pid: int, v: float = 0.8, ident: str = ""):
+    s = _sess(name, pid, v)
+    s.InstanceIdentifier = ident or f"{name}|{pid}"
+    return s
+
+
+@pytest.mark.parametrize(
+    "text,want",
+    [
+        ("сделай музыку потише", {"action": "volume_down"}),
+        ("Ая, музыку тише", {"action": "volume_down"}),
+        ("сделай потише музыку", {"action": "volume_down"}),
+        ("убавь музыку", {"action": "volume_down"}),
+        ("приглуши музыку", {"action": "volume_down"}),
+        ("сделай трек погромче", {"action": "volume_up"}),
+        ("прибавь громкость музыки", {"action": "volume_up"}),
+        ("музыку громче!", {"action": "volume_up"}),
+        ("громкость музыки 30", {"action": "volume", "level": 30}),
+        ("поставь громкость музыки на 45%", {"action": "volume", "level": 45}),
+        ("сделай погромче", None),  # без слова «музыка» — может быть и общая громкость: решает модель
+        ("заглуши музыку", {"action": "pause"}),
+    ],
+)
+def test_quick_intent_music_volume(text, want):
+    assert music.quick_intent(text) == want
+
+
+def test_music_volume_changes_browser_not_speakers(monkeypatch, db_reset):
+    """Жалоба: «сделай музыку тише» меняло громкость всего Windows или ничего не делало."""
+    ss = [_vol_sess("browser.exe", 5), _vol_sess("Discord.exe", 6)]
+    monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: ss)
+    monkeypatch.setattr(system, "now_playing", lambda: {"status": "playing"})
+    out = music.tool({"action": "volume_down"})
+    assert abs(ss[0].SimpleAudioVolume.v - 0.56) < 1e-6
+    assert ss[1].SimpleAudioVolume.v == 0.8  # звонок в Discord не трогаем
+    assert "56%" in out and "Яндекс Браузер" in out
+    music.tool({"action": "volume_up"})
+    assert abs(ss[0].SimpleAudioVolume.v - 0.8) < 1e-6
+    music.tool({"action": "volume", "level": 30})
+    assert abs(ss[0].SimpleAudioVolume.v - 0.3) < 1e-6
+
+
+def test_music_volume_steps_are_even_by_ear():
+    """Шаг — в разах (≈ −3 дБ), а не минус 10 процентов: на 100% такой шаг не слышен."""
+    assert system.step_volume(1.0, "down") == pytest.approx(0.7)
+    assert system.step_volume(0.7, "up") == pytest.approx(1.0)
+    assert system.step_volume(1.0, "up") == 1.0
+    assert system.step_volume(0.04, "down") == 0.0  # совсем тихо — выключаем
+    assert system.step_volume(0.0, "up") == pytest.approx(0.1)  # из нуля — слышно сразу
+
+
+def test_music_volume_while_ducked_survives_restore(monkeypatch, db_reset):
+    """Пока Ая говорит, музыка приглушена; «тише» должно пережить возврат громкости."""
+    db.set_setting("music_duck", "lower")
+    s = _vol_sess("chrome.exe", 7)
+    monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: [s])
+    monkeypatch.setattr(system, "now_playing", lambda: {"status": "playing"})
+    system._DUCK.update(reasons=set(), volumes={}, paused=None)
+    system.duck(True, "aya")
+    assert abs(s.SimpleAudioVolume.v - 0.2) < 1e-6
+    music.tool({"action": "volume_down"})
+    assert abs(s.SimpleAudioVolume.v - 0.56 * 0.25) < 1e-6  # всё ещё приглушена, но тише
+    assert json.loads(db.setting("music_duck_saved", ""))["chrome.exe"] == pytest.approx(0.56)
+    system.duck(False, "aya")
+    assert abs(s.SimpleAudioVolume.v - 0.56) < 1e-6
+
+
+def test_duck_restores_every_session_of_one_process(monkeypatch, db_reset):
+    """У браузера бывает несколько звуковых сеансов в одном процессе — вернуть надо все."""
+    db.set_setting("music_duck", "lower")
+    a, b = _vol_sess("chrome.exe", 7, ident="a"), _vol_sess("chrome.exe", 7, ident="b")
+    monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: [a, b])
+    system._DUCK.update(reasons=set(), volumes={}, paused=None)
+    system.duck(True, "aya")
+    system.duck(False, "aya")
+    assert abs(a.SimpleAudioVolume.v - 0.8) < 1e-6 and abs(b.SimpleAudioVolume.v - 0.8) < 1e-6
+
+
+def test_music_volume_nothing_playing(monkeypatch, db_reset):
+    monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: [_vol_sess("Discord.exe", 6)])
+    monkeypatch.setattr(system, "now_playing", lambda: {"status": "none"})
+    assert "не играет" in music.tool({"action": "volume_down"})
+
+
+def test_own_player_volume(monkeypatch, db_reset):
+    """Яндекс Музыка играет в самой Ае — тише делаем её плеер, браузер не трогаем."""
+    s = _vol_sess("browser.exe", 5)
+    monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: [s])
+    player.load(_items(2), "", "yandex", "x")
+    seq = player.snapshot()["seq"]
+    out = music.tool({"action": "volume_down"})
+    snap = player.snapshot()
+    assert snap["volume"] == 70 and snap["seq"] > seq and "70%" in out
+    assert s.SimpleAudioVolume.v == 0.8
+    assert db.setting("music_player_volume", "") == "70"
+    assert "максимум" in music.tool({"action": "volume", "level": 100}) or player.snapshot()["volume"] == 100
+    assert "максимум" in music.tool({"action": "volume_up"})
+
+
+def test_player_volume_buttons(client, db_reset):
+    player.load(_items(2), "", "yandex", "x")
+    r = client.post("/api/music/player", json={"cmd": "voldown"}).json()
+    assert r["volume"] == 70 and r["status"] == "playing"
+    r = client.post("/api/music/player", json={"cmd": "volup"}).json()
+    assert r["volume"] == 100
+    assert client.get("/api/music/player").json()["volume"] == 100
+
+
+def test_model_told_music_volume_is_not_system_volume(db_reset):
+    """Модель брала set_volume (весь компьютер) на «сделай музыку тише»."""
+    from core.safety import tool_text
+
+    assert "volume_down" in tool_text._music_line() and "volume_up" in tool_text._music_line()
+    assert "общая громкость компьютера" in tool_text.GATED_LINES["set_volume"]
+
+
+def test_music_volume_tolerates_model_variants(monkeypatch, db_reset):
+    """Модель пишет громкость по-разному: «30%» строкой, change вместо отдельного действия."""
+    s = _vol_sess("browser.exe", 5)
+    monkeypatch.setattr(system, "audio_sessions", lambda active_only=True: [s])
+    monkeypatch.setattr(system, "now_playing", lambda: {"status": "playing"})
+    music.tool({"action": "volume", "level": "30%"})
+    assert abs(s.SimpleAudioVolume.v - 0.3) < 1e-6
+    music.tool({"action": "volume", "change": "up"})
+    assert abs(s.SimpleAudioVolume.v - 0.3 / 0.7) < 1e-3
+    assert "level" in music.tool({"action": "volume"})  # без уровня — подсказка, громкость не трогаем

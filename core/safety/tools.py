@@ -85,6 +85,10 @@ KNOWN_ACTIONS = {
 # Всегда доступные (без per-tool разрешения): свободные вспомогательные
 FREE_ACTIONS = {"remember_fact", "switch_agent", "list_skills", "load_skill", "delegate", "delegate_bg"}
 
+# Ядро работает через pythonw.exe — без своей консоли. Консольная программа
+# (PowerShell, cmd, ssh), запущенная без этого флага, открывала пустое чёрное окно.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 RATE_LIMIT = "perm_rate_limit"  # действий за минуту, пользователь может задать в config
 
 
@@ -334,7 +338,8 @@ def run_action(name: str, args: dict) -> str:
         }
         app_id = app_id.lower()
         if app_id in known:
-            subprocess.Popen(known[app_id], shell=False)
+            via_cmd = known[app_id][0] == "cmd"  # cmd /c start — само окно cmd прячем
+            subprocess.Popen(known[app_id], shell=False, creationflags=NO_WINDOW if via_cmd else 0)
             db.log_event("tool", f"opened {app_id}")
             return f"открыла {APP_DISPLAY.get(app_id) or app_id}"
         if not re.fullmatch(r"[A-Za-z0-9_.\-]+", app_id or "") or app_id.startswith("."):
@@ -346,7 +351,7 @@ def run_action(name: str, args: dict) -> str:
             db.log_event("tool", f"opened {app_id}")
             return f"открыла {app_id}"
         # последний шанс — доверяем Windows
-        subprocess.Popen(["cmd", "/c", "start", "", app_id], shell=False)
+        subprocess.Popen(["cmd", "/c", "start", "", app_id], shell=False, creationflags=NO_WINDOW)
         db.log_event("tool", f"launch fallback {app_id}")
         return f"попробовала запустить {app_id} — если не открылся, дай путь до exe или скажи, где стоит"
 
@@ -524,7 +529,7 @@ def run_action(name: str, args: dict) -> str:
 
             proc = _sp.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", PS_UTF8_PRELUDE + command],
-                capture_output=True, timeout=120, cwd=cwd,
+                capture_output=True, timeout=120, cwd=cwd, creationflags=NO_WINDOW,
             )
             out = _decode_out(proc.stdout or b"").rstrip()
             err = _decode_out(proc.stderr or b"").rstrip()
@@ -660,7 +665,7 @@ def run_action(name: str, args: dict) -> str:
         try:
             import subprocess as _sp
 
-            proc = _sp.run(cmd, capture_output=True, timeout=90)
+            proc = _sp.run(cmd, capture_output=True, timeout=90, creationflags=NO_WINDOW)
             out = _decode_out(proc.stdout or b"").rstrip()
             err = _decode_out(proc.stderr or b"").rstrip()
         except _sp.TimeoutExpired:

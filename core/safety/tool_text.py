@@ -14,7 +14,7 @@ GATED_LINES = {
         "target https://www.google.com/search?q=<запрос>; открыть сайт — его адрес (https://youtube.com и т.п.)\n"
         "- open_app {target: C:\\путь\\прог.exe} — запустить конкретный exe\n"
     ),
-    "set_volume": "- set_volume {level: 0..100}\n",
+    "set_volume": "- set_volume {level: 0..100} — общая громкость компьютера (все звуки). Музыку тише/громче — только через music\n",
     "create_note": "- create_note {text: string}\n",
     "search_allowed_folder": "- search_allowed_folder {query: string} — найти файлы по имени\n",
     "get_task_status": "- get_task_status {}\n",
@@ -62,9 +62,11 @@ def _music_line() -> str:
     except Exception:  # noqa: BLE001
         svc, ym = "YouTube", ""
     return (
-        "- music {action: play|pause|resume|next|prev|now, query?: что включить — песня, исполнитель, жанр или настроение, "
-        "service?: youtube|yandex, what?: likes|wave} — музыка (всегда доступно): «включи …» → play с query; "
+        "- music {action: play|pause|resume|next|prev|now|volume_up|volume_down|volume, query?: что включить — песня, исполнитель, жанр или настроение, "
+        "service?: youtube|yandex, what?: likes|wave, level?: 0..100} — музыка (всегда доступно): «включи …» → play с query; "
         "«мои лайки» → what=likes, «Моя волна» → what=wave (Яндекс); пауза/дальше/назад/«что играет» → соответствующий action. "
+        "«Сделай музыку тише/громче» → volume_down/volume_up, «громкость музыки 30» → volume с level: меняется громкость только музыки "
+        "(YouTube, Яндекс, плеер), а не всего компьютера — для музыки set_volume не используй. "
         f"Сервис по умолчанию: {svc}, другой — только если юзер его назвал.{ym} "
         "Любую просьбу про музыку (включи, пауза, продолжи, дальше, что играет) выполняй ТОЛЬКО через music — "
         "никогда не говори «поставила на паузу» или «включила», не вызвав его.\n"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { musicStep, nowPlayingLine, rampVolume, type MusicSnap } from "./music-logic";
+import { barView, musicStep, nowPlayingLine, playerGain, rampVolume, type MusicSnap } from "./music-logic";
 
 const snap = (over: Partial<MusicSnap>): MusicSnap => ({
   seq: 2,
@@ -46,5 +46,28 @@ describe("helpers", () => {
   it("formats now playing", () => {
     expect(nowPlayingLine({ id: "1", title: "Утро", artist: "Дайте танк (!)" })).toBe("♪ Дайте танк (!) — Утро");
     expect(nowPlayingLine(null)).toBe("");
+  });
+});
+
+describe("плеер в окне", () => {
+  it("виден, пока свой плеер играет или на паузе", () => {
+    expect(barView(snap({})).visible).toBe(true);
+    expect(barView(snap({ status: "paused" }))).toMatchObject({ visible: true, playing: false });
+    expect(barView(snap({ status: "idle", current: null })).visible).toBe(false);
+    expect(barView(null).visible).toBe(false);
+  });
+  it("показывает трек и громкость", () => {
+    const v = barView(snap({ volume: 70 }));
+    expect(v).toMatchObject({ playing: true, artist: "КИНО", title: "Группа крови", volume: 70 });
+    expect(v.canLouder).toBe(true);
+    expect(barView(snap({ volume: 100 })).canLouder).toBe(false);
+    expect(barView(snap({ volume: 0 })).canQuieter).toBe(false);
+  });
+  it("старое ядро без громкости — 100%", () => {
+    expect(barView(snap({})).volume).toBe(100);
+    expect(playerGain(snap({}))).toBe(1);
+    expect(playerGain(snap({ volume: 49 }))).toBeCloseTo(0.49);
+    expect(playerGain(snap({ volume: 999 }))).toBe(1);
+    expect(playerGain(null)).toBe(1);
   });
 });

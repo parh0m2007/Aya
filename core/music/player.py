@@ -7,11 +7,22 @@
 import threading
 import time
 
+from .. import db
 from . import yandex
+
+VOLUME_KEY = "music_player_volume"
 
 _LOCK = threading.Lock()
 STATE = {"seq": 0, "cmd": "", "items": [], "pos": -1, "status": "idle", "source": "", "service": "", "title": "", "updated": 0.0, "user_ts": 0.0}
 # user_ts — когда своим плеером последний раз управлял человек (не «трек доиграл»)
+
+
+def volume() -> int:
+    """Громкость своего плеера, 0–100 (сохраняется между запусками)."""
+    try:
+        return max(0, min(100, int(db.setting(VOLUME_KEY, "100"))))
+    except Exception:  # noqa: BLE001 — мусор в настройке или база ещё не открыта
+        return 100
 
 
 def snapshot() -> dict:
@@ -26,6 +37,7 @@ def snapshot() -> dict:
             "pos": STATE["pos"],
             "count": len(STATE["items"]),
             "current": dict(cur) if cur else None,
+            "volume": volume(),
         }
 
 
@@ -64,8 +76,28 @@ def _refill() -> None:
     STATE["items"].extend(extra)
 
 
+def set_volume(level: int) -> dict:
+    """Громкость своего плеера. Окно узнаёт по seq и меняет громкость трека."""
+    level = max(0, min(100, int(level)))
+    with _LOCK:
+        db.set_setting(VOLUME_KEY, str(level))
+        _bump("volume")
+        STATE["user_ts"] = time.time()
+    return snapshot()
+
+
+def step(change: str) -> int:
+    """Громкость после одного шага «тише»/«громче» (тот же шаг, что у браузера)."""
+    from .system import step_volume
+
+    return round(step_volume(volume() / 100, change) * 100)
+
+
 def command(cmd: str) -> dict:
-    """pause | play | next | prev | stop | ended (трек доиграл — от окна)."""
+    """pause | play | next | prev | stop | ended (трек доиграл — от окна) |
+    volup | voldown (кнопки громкости в плеере)."""
+    if cmd in ("volup", "voldown"):
+        return set_volume(step("up" if cmd == "volup" else "down")) if STATE["pos"] >= 0 else snapshot()
     user = cmd not in ("ended", "error")
     with _LOCK:
         if STATE["pos"] < 0:
@@ -103,7 +135,7 @@ def command(cmd: str) -> dict:
 
 def snapshot_unlocked() -> dict:
     cur = STATE["items"][STATE["pos"]] if 0 <= STATE["pos"] < len(STATE["items"]) else None
-    return {"seq": STATE["seq"], "cmd": STATE["cmd"], "status": STATE["status"], "service": STATE["service"], "title": STATE["title"], "pos": STATE["pos"], "count": len(STATE["items"]), "current": dict(cur) if cur else None}
+    return {"seq": STATE["seq"], "cmd": STATE["cmd"], "status": STATE["status"], "service": STATE["service"], "title": STATE["title"], "pos": STATE["pos"], "count": len(STATE["items"]), "current": dict(cur) if cur else None, "volume": volume()}
 
 
 def describe() -> dict:

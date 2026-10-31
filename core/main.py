@@ -248,12 +248,23 @@ class PendingIn(BaseModel):
 
 COMP_SYSTEM = (
     "Ты — {name}, спутница-ассистент. Ты только что незаметно для пользователя выполнила его просьбу "
-    "и теперь отвечаешь ему лично. Отвечай по-русски, кратко и тепло, на «ты» (1–4 предложения): "
+    "и теперь отвечаешь ему лично. Отвечай по-русски, кратко, на «{address}» (1–4 предложения), в своём характере: "
     "получилось ли, что именно произошло или что помешало. "
     "Результат действия может быть машинным (листинг, лог, код ошибки, таблица) — не повторяй его целиком: "
     "перескажи суть своими словами, при необходимости 2–4 конкретных пункта. "
     "Не выдумывай результат и не добавляй код, пути и команды без необходимости."
 )
+
+
+def _comp_system() -> str:
+    """Системный промпт пересказа результата действия — с характером из конструктора.
+    Раньше здесь было «кратко и тепло» для любого характера."""
+    prof = persona.load()
+    text = COMP_SYSTEM.replace("{name}", prof["name"]).replace("{address}", prof["address"])
+    if prof.get("configured"):
+        lines = "\n".join("- " + line for line in persona.character_lines(prof))
+        return text + "\n\nТвой характер (держи его и здесь):\n" + lines + "\n" + persona.reminder(prof)
+    return text + "\n\nТвой характер: тёплая, заботливая, с мягким юмором."
 
 
 async def _compose_chunks(adapters, user_text: str, tool_name: str, result):
@@ -267,7 +278,7 @@ async def _compose_chunks(adapters, user_text: str, tool_name: str, result):
     fallback = "Готово: " + str(result)[:400]
     got = ""
     try:
-        system = COMP_SYSTEM.replace("{name}", persona.name())
+        system = _comp_system()
         async for chunk in stream_llm(adapters, system, [{"role": "user", "content": prompt}]):
             got += chunk
     except Exception:
@@ -612,14 +623,14 @@ def _init_prompt(topic: str, tg_items: list[dict] | None = None) -> str:
         note = topic.split(":", 1)[1][:180]
         return (
             f"Пришло время напоминания, которое попросил пользователь: «{note}». "
-            "Скажи об этом коротко и тепло, одним предложением-двумя; можно чуть пошутить. "
+            "Скажи об этом коротко, в своём характере, одним предложением-двумя. "
             "Не задавай вопросов, просто напомни."
         )
     if topic.startswith("report:"):
         note = topic.split(":", 1)[1][:900]
         return (
             "Прилетел отчёт от фонового суб-агента, который работал по твоему поручению. "
-            "Перескажи пользователю его итог своими словами, тепло и кратко (пара предложений):\n" + note
+            "Перескажи пользователю его итог своими словами, кратко и в своём характере (пара предложений):\n" + note
         )
     if topic.startswith("tg:"):
         items = tg_items if tg_items is not None else bridge_tguser.peek_inbox(8)
@@ -649,7 +660,7 @@ def _init_prompt(topic: str, tg_items: list[dict] | None = None) -> str:
         return base
     if topic == "morning":
         return (
-            "Новое утро началось. Поприветствуй пользователя тепло и живо, одно-два предложения. "
+            "Новое утро началось. Поприветствуй пользователя в своём характере, одно-два предложения. "
             "Не задавай много вопросов, просто покажись."
         )
     if topic == "break":
@@ -657,22 +668,22 @@ def _init_prompt(topic: str, tg_items: list[dict] | None = None) -> str:
         where = f" Ты уже много часов не выходил из «{app}»." if app else ""
         return (
             "Пользователь давно сидит в одном приложении без перерыва." + where + " "
-            "Мягко предложи передохнуть: чаю, размяться, глянуть в окно. Тепло, без нотаций, 1-2 предложения."
+            "Предложи передохнуть: чаю, размяться, глянуть в окно. В своём характере, без нотаций, 1-2 предложения."
         )
     if topic == "idle":
         return (
-            "Пользователь давно не трогал клавиатуру. Тихо поинтересуйся, всё ли в порядке — "
-            "может он ушёл, а может монотонным делом занят. Одно мягкое предложение."
+            "Пользователь давно не трогал клавиатуру. Коротко поинтересуйся, всё ли в порядке — "
+            "может он ушёл, а может монотонным делом занят. Одно предложение, в своём характере."
         )
     if topic == "digest":
         stats_txt = proactive.summary_text()
         n_msg = db.query("SELECT COUNT(*) FROM messages WHERE ts>=?", (time.time() - 86400,))
         cnt = int(n_msg[0][0]) if n_msg else 0
         return (
-            "Вечер. Расскажи пользователю короткий тёплый итог дня: "
+            "Вечер. Расскажи пользователю короткий итог дня: "
             f"{stats_txt} "
             f"За сутки в чате у вас было около {cnt} сообщений. "
-            "Подать живо и с теплом: чем занимались, что было важно. До 4 предложений."
+            "Подай в своём характере: чем занимались, что было важно. До 4 предложений."
         )
     return INIT_PROMPTS.get(topic, topic)
 
@@ -1215,10 +1226,17 @@ async def tts_diag(payload: dict):
 
 
 @app.get("/api/speak")
-async def speak_endpoint(text: str, mood: str = "calm", voice: str = ""):
+async def speak_endpoint(text: str, mood: str = "calm", voice: str = "", traits: str = ""):
+    """traits — характер с ползунков конструктора (JSON), чтобы «Послушать» звучало им до сохранения."""
     from fastapi import HTTPException
 
-    path, hit = await tts.speak(text, mood, vid_override=voice)
+    style = None
+    if traits:
+        try:
+            style = persona.voice_style_for(json.loads(traits))
+        except (ValueError, TypeError):
+            style = None
+    path, hit = await tts.speak(text, mood, vid_override=voice, style=style)
     if not path:
         raise HTTPException(status_code=204, detail="empty text")
     fmt = "audio/mpeg" if path.endswith(".mp3") else "audio/wav"
@@ -1390,12 +1408,6 @@ class SayIn(BaseModel):
     kind: str  # pat | poke | hello | wake
 
 
-REACTIONS = {
-    "pat": ["Хе-хе… приятно.", "Ну-у, перестань, я же смущаюсь!", "Мур… ещё чуть-чуть.", "Как приятно, когда гладят…"],
-    "poke": ["Эй! Щекотно!", "Ай! Ты чего?", "Я тут, тут! Не тыкай.", "Хм? Что-то нужно?"],
-    "hello": ["Привет! Я рядом.", "О, ты здесь. Как дела?", "Хей! Чем займёмся?"],
-    "wake": ["Ой, я задумалась… Ты что-то хотел?", "А? Я не сплю, честно!", "Хм-м… о чём это я."],
-}
 
 
 @app.post("/api/react")
@@ -1403,8 +1415,9 @@ async def react(body: SayIn):
     """Короткая реплика на касание аватара — без LLM, мгновенно (плюс кэш озвучки)."""
     import random
 
-    lines = REACTIONS.get(body.kind) or REACTIONS["poke"]
     prof = persona.load()
+    reactions = persona.reaction_set(prof)  # реплики под характер из конструктора
+    lines = reactions.get(body.kind) or reactions["poke"]
     if body.kind == "hello" and prof.get("greeting"):
         lines = [prof["greeting"], *lines]
     mood = {"pat": "joyful", "poke": "surprise", "hello": "joyful", "wake": "thoughtful"}.get(body.kind, "calm")
@@ -1748,7 +1761,7 @@ async def music_player_state():
 
 
 class MusicPlayerIn(BaseModel):
-    cmd: str  # ended | error | pause | play | next | prev | stop
+    cmd: str  # ended | error | pause | play | next | prev | stop | volup | voldown
 
 
 @app.post("/api/music/player")

@@ -104,7 +104,7 @@ def _cloud_chat(client, monkeypatch, fake_fish, tmp_path):
 
 
 def test_chat_cloud_voice_streams_pieces(client, monkeypatch, db_reset, tmp_path):
-    async def fake_fish(text, vid, on_chunk=None):
+    async def fake_fish(text, vid, on_chunk=None, style=None):
         for part in (b"ID3", b"-", text.encode()[:6]):
             await asyncio.sleep(0.01)
             await on_chunk(part)
@@ -119,7 +119,7 @@ def test_chat_cloud_voice_streams_pieces(client, monkeypatch, db_reset, tmp_path
 
 
 def test_chat_cloud_voice_falls_back_when_fish_fails(client, monkeypatch, db_reset, tmp_path):
-    async def dead_fish(text, vid, on_chunk=None):
+    async def dead_fish(text, vid, on_chunk=None, style=None):
         return None
 
     edge = tmp_path / "edge.mp3"
@@ -171,7 +171,7 @@ def test_fallback_voice_is_not_cached_as_fish(db_reset, monkeypatch, tmp_path):
     """Fish один раз не ответил — фраза навсегда оставалась голосом Edge."""
     puts, edge = _cache_spy(monkeypatch, tmp_path)
 
-    async def dead_fish(text, vid, on_chunk=None):
+    async def dead_fish(text, vid, on_chunk=None, style=None):
         return None
 
     monkeypatch.setattr(tts, "_fish_speak", dead_fish)
@@ -185,7 +185,7 @@ def test_fish_voice_is_cached(db_reset, monkeypatch, tmp_path):
     fish = tmp_path / "fish.mp3"
     fish.write_bytes(b"FISH")
 
-    async def ok_fish(text, vid, on_chunk=None):
+    async def ok_fish(text, vid, on_chunk=None, style=None):
         return str(fish), 0
 
     monkeypatch.setattr(tts, "_fish_speak", ok_fish)
@@ -205,7 +205,7 @@ def test_game_fallback_is_not_cached_as_local_voice(db_reset, monkeypatch, tmp_p
 def test_live_fallback_is_not_cached_as_fish(db_reset, monkeypatch, tmp_path):
     puts, edge = _cache_spy(monkeypatch, tmp_path)
 
-    async def dead_fish(text, vid, on_chunk=None):
+    async def dead_fish(text, vid, on_chunk=None, style=None):
         return None
 
     monkeypatch.setattr(tts, "_fish_speak", dead_fish)

@@ -993,3 +993,176 @@ input:focus-visible {
 .update-bar span { flex: 1; }
 .update-bar button { border: 0; border-radius: 10px; padding: 6px 12px; cursor: pointer; background: linear-gradient(135deg, #f7a8d8, #c9a7ff); color: #1a1024; font-weight: 650; }
 .update-bar button.later { background: transparent; color: #cbbfe0; }
+
+/* ───────── плеер Яндекс Музыки (играет в самой Ае) ───────── */
+.mbar {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  width: min(272px, calc(100vw - 24px));
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  z-index: 36;
+  opacity: 0.55;
+  transition: opacity 0.25s var(--ease), border-color 0.25s;
+  animation: mbar-in 0.25s var(--ease);
+}
+
+@keyframes mbar-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+.mbar:hover,
+.mbar:focus-within,
+.mbar.fresh,
+body.hovering .mbar {
+  opacity: 1;
+}
+
+.mbar.error {
+  border-color: var(--danger);
+}
+
+body.panel-open .mbar {
+  display: none;
+}
+
+.mb-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mb-note {
+  width: 15px;
+  height: 15px;
+  color: var(--lav);
+}
+
+.mb-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.mb-text b,
+.mb-text span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mb-text b {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.mb-text span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mb-text span:empty {
+  display: none;
+}
+
+.mb-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.mb-btn {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  transition: background 0.15s, transform 0.15s var(--ease), opacity 0.15s;
+}
+
+.mb-btn .ic {
+  width: 17px;
+  height: 17px;
+}
+
+.mb-btn .ic.solid {
+  fill: currentColor;
+  stroke-width: 1.2;
+}
+
+.mb-btn:hover {
+  background: var(--surface-2);
+}
+
+.mb-btn:active {
+  transform: scale(0.92);
+}
+
+.mb-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  background: transparent;
+  transform: none;
+}
+
+.mb-btn.busy {
+  opacity: 0.6;
+}
+
+.mb-play {
+  width: 38px;
+  height: 38px;
+  margin: 0 2px;
+  background: var(--grad);
+  color: var(--ink);
+  box-shadow: 0 6px 16px rgba(195, 166, 255, 0.28);
+}
+
+.mb-play:hover {
+  background: var(--grad);
+  filter: brightness(1.06);
+}
+
+.mb-close {
+  width: 24px;
+  height: 24px;
+  color: var(--muted);
+}
+
+.mb-close .ic {
+  width: 13px;
+  height: 13px;
+}
+
+.mb-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--line-strong);
+}
+
+.mb-vol {
+  min-width: 38px;
+  text-align: center;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}

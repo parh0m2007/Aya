@@ -801,8 +801,37 @@ FISH_SR = 24000
 FISH_MEDIA = f"audio/pcm;rate={FISH_SR}"
 
 
-def _fish_body(text: str, vid: str) -> dict:
-    return {
+def fish_style(style: dict | None = None) -> dict:
+    """Подача облачного голоса по характеру из конструктора (тег, скорость,
+    выразительность). style — уже готовая подача (черновик в конструкторе)."""
+    if style is not None:
+        return style
+    try:
+        from .. import persona
+
+        return persona.voice_style()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _style_sig(style: dict) -> str:
+    return hashlib.sha1(json.dumps(style, sort_keys=True).encode()).hexdigest()[:10] if style else ""
+
+
+def _voice_key(vid: str, style: dict) -> str:
+    """Голос для ключа кэша: та же фраза другим характером — другая запись."""
+    sig = _style_sig(style)
+    return f"{vid}~{sig}" if sig else vid
+
+
+def _fish_cache_path(text: str, vid: str, style: dict) -> str:
+    sig = _style_sig(style)
+    mid = f"t2|{sig}|" if sig else "t2|"  # без характера — прежний путь, старый кэш годится
+    return str(_cache_dir / (hashlib.sha1(f"fish|{vid}|{mid}{text}".encode()).hexdigest() + ".wav"))
+
+
+def _fish_body(text: str, vid: str, style: dict | None = None) -> dict:
+    body = {
         "text": text,
         "reference_id": FISH_VOICES[vid],
         "format": "pcm",
@@ -810,6 +839,14 @@ def _fish_body(text: str, vid: str) -> dict:
         "latency": fish_latency(),
         "chunk_length": 100,
     }
+    if style:
+        if style.get("tag"):
+            body["text"] = f"{style['tag']} {text}"  # подсказку подачи Fish не произносит
+        if style.get("speed") and style["speed"] != 1.0:
+            body["prosody"] = {"speed": style["speed"]}
+        if style.get("temperature"):
+            body["temperature"] = style["temperature"]
+    return body
 
 
 def _write_wav(path: str, pcm: bytes, sr: int) -> None:
@@ -830,13 +867,16 @@ def _fish_headers() -> dict:
     }
 
 
-async def _fish_speak(text: str, vid: str, on_chunk=None) -> tuple[str, int] | None:
+async def _fish_speak(text: str, vid: str, on_chunk=None, style: dict | None = None) -> tuple[str, int] | None:
     """Синтез в Fish потоком. on_chunk(bytes) получает PCM по мере прихода."""
     import asyncio
 
-    old = str(_cache_dir / (hashlib.sha1(f"fish|{vid}|t1|{text}".encode()).hexdigest() + ".mp3"))
-    path = str(_cache_dir / (hashlib.sha1(f"fish|{vid}|t2|{text}".encode()).hexdigest() + ".wav"))
-    for cached in (path, old):  # старый mp3-кэш тоже годится
+    style = fish_style(style)
+    path = _fish_cache_path(text, vid, style)
+    cands = [path]
+    if not style:  # старый mp3-кэш тоже годится — он без характера
+        cands.append(str(_cache_dir / (hashlib.sha1(f"fish|{vid}|t1|{text}".encode()).hexdigest() + ".mp3")))
+    for cached in cands:
         if os.path.exists(cached) and os.path.getsize(cached) > 0:
             return cached, 1
     if not fish_ready():
@@ -844,7 +884,7 @@ async def _fish_speak(text: str, vid: str, on_chunk=None) -> tuple[str, int] | N
     buf = bytearray()
     try:
         async with _FishClient() as c:
-            async with c.stream("POST", FISH_URL, json=_fish_body(text, vid), headers=_fish_headers()) as r:
+            async with c.stream("POST", FISH_URL, json=_fish_body(text, vid, style), headers=_fish_headers()) as r:
                 if r.status_code != 200:
                     await r.aread()
                     print(f"[tts] fish HTTP {r.status_code}: {r.text[:200]}", file=sys.stderr)
@@ -882,7 +922,7 @@ async def _cloud_fallback(text: str) -> tuple[str, int] | None:
     return await _qwen_speak(text, "qwen_17")
 
 
-async def speak_live(text: str, mood: str = "calm", vid_override: str = ""):
+async def speak_live(text: str, mood: str = "calm", vid_override: str = "", style: dict | None = None):
     """Для облачного голоса — LiveAudio, звук идёт по мере синтеза.
 
     None — голос не облачный или Fish недоступен: зовите обычный speak().
@@ -898,7 +938,8 @@ async def speak_live(text: str, mood: str = "calm", vid_override: str = ""):
     if not text:
         return None
     live = LiveAudio(FISH_MEDIA)
-    key = _index_key(vid, mood, text)
+    style = fish_style(style)
+    key = _index_key(_voice_key(vid, style), mood, text)
     hit = _index_get(key)
     if hit:
         await live.finish(hit)
@@ -907,7 +948,7 @@ async def speak_live(text: str, mood: str = "calm", vid_override: str = ""):
     async def produce():
         path = None
         try:
-            r = await _fish_speak(text, vid, on_chunk=live.push)
+            r = await _fish_speak(text, vid, on_chunk=live.push, style=style)
             if r and r[0]:
                 path = r[0]
                 _index_put(key, path)  # в кэш — только голос Fish, не запасной
@@ -935,7 +976,7 @@ def fast_nfe() -> int | None:
         return 16
 
 
-async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: bool = False) -> tuple[str, int]:
+async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: bool = False, style: dict | None = None) -> tuple[str, int]:
     text = text.strip()[:600]
     if not text:
         return None, 1
@@ -947,12 +988,14 @@ async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: boo
     game = _in_game()
     # быстрый путь: та же фраза тем же голосом уже озвучена — отдаём файл,
     # не загружая ни TTS, ни ударения (раньше кэш проверялся после загрузки движка)
-    key = _index_key(vid, mood, text)
+    style = fish_style(style) if vid in FISH_VOICES else {}
+    kvid = _voice_key(vid, style)
+    key = _index_key(kvid, mood, text)
     hit = _index_get(key)
     nfe = fast_nfe() if fast else None
     if not hit and nfe:
         # готовой полной версии нет — может, есть быстрая
-        key = _index_key(vid + "#fast", mood, text)
+        key = _index_key(kvid + "#fast", mood, text)
         hit = _index_get(key)
     if hit:
         from ..llm import metrics as _svc
@@ -964,7 +1007,7 @@ async def speak(text: str, mood: str = "calm", vid_override: str = "", fast: boo
     # оставался бы голосом этой фразы навсегда, даже когда свой голос заработает
     primary = False
     if vid in FISH_VOICES:
-        r = await _fish_speak(text, vid)
+        r = await _fish_speak(text, vid, style=style)
         primary = r is not None
         if r is None:
             r = await _cloud_fallback(text)

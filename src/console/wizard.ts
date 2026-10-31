@@ -125,7 +125,9 @@ export async function openWizard(onDone: () => void): Promise<void> {
     if (voice === "none") return;
     btn.classList.add("busy");
     const text = draft.profile.greeting || `Привет! Я ${draft.profile.name || "Ая"}, я рядом.`;
-    audio = new Audio(`${CORE}/api/speak?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice)}`);
+    // характер с ползунков — облачный голос звучит им ещё до сохранения
+    const traits = encodeURIComponent(JSON.stringify(draft.profile.traits));
+    audio = new Audio(`${CORE}/api/speak?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice)}&traits=${traits}`);
     audio.onplaying = () => btn.classList.remove("busy");
     audio.onended = audio.onerror = () => btn.classList.remove("busy");
     try {

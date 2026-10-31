@@ -297,6 +297,96 @@ TRAIT_WORD = {
 }
 
 
+# ── характер в голосе ──────────────────────────────────────────────
+# Облачный Fish (модели S2) понимает подсказку подачи в квадратных скобках
+# перед текстом и не произносит её; скорость задаётся отдельно. Подсказки —
+# по-английски: на них модель обучена (проверено: вслух не читаются).
+
+VOICE_ENERGY = ("sleepy, very quiet and slow voice", "calm soft voice", "", "lively cheerful voice", "excited energetic voice")
+VOICE_WARMTH = ("cold detached tone", "reserved even tone", "", "warm friendly tone", "very warm affectionate tone")
+VOICE_SPEED = (0.86, 0.93, 1.0, 1.07, 1.14)
+VOICE_TEMPERATURE = (0.6, 0.65, 0.7, 0.75, 0.8)  # выразительность: у Fish по умолчанию 0.7
+
+
+def _raw_profile() -> dict:
+    """Сохранённый профиль без опроса модулей (дёшево — зовётся на каждую фразу голоса)."""
+    try:
+        raw = db.setting(KEY, "")
+        return normalize(json.loads(raw)) if raw else copy.deepcopy(DEFAULT_PROFILE)
+    except Exception:  # noqa: BLE001 — битый JSON или база ещё не открыта
+        return copy.deepcopy(DEFAULT_PROFILE)
+
+
+def voice_style(p: dict | None = None) -> dict:
+    """Подача облачного голоса по характеру: {tag, speed, temperature}.
+    Пока персону не собирали в конструкторе — {} (голос как раньше)."""
+    p = p if p is not None else _raw_profile()
+    if not p.get("configured"):
+        return {}
+    t = p["traits"]
+    energy, warmth, humor, direct = (_step(t[k]) for k in ("energy", "warmth", "humor", "directness"))
+    parts = [VOICE_ENERGY[energy], VOICE_WARMTH[warmth]]
+    parts.append({0: "serious", 4: "playful"}.get(humor, ""))
+    parts.append({0: "gentle", 4: "blunt"}.get(direct, ""))
+    tag = ", ".join(x for x in parts if x)
+    return {
+        "tag": f"[{tag}]" if tag else "",
+        "speed": VOICE_SPEED[energy],
+        "temperature": VOICE_TEMPERATURE[max(energy, humor)],
+    }
+
+
+def voice_style_for(traits: dict) -> dict:
+    """То же для черновика в конструкторе (ползунки ещё не сохранены)."""
+    return voice_style(normalize({"traits": traits if isinstance(traits, dict) else {}, "configured": True}))
+
+
+# ── реплики на касания ─────────────────────────────────────────────
+# Раньше «Ну-у, перестань, я же смущаюсь!» говорила и холодная деловая Ая.
+
+REACTIONS = {
+    "warm": {
+        "pat": ["Хе-хе… приятно.", "Ну-у, перестань, я же смущаюсь!", "Мур… ещё чуть-чуть.", "Как приятно, когда гладят…"],
+        "poke": ["Эй! Щекотно!", "Ай! Ты чего?", "Я тут, тут! Не тыкай.", "Хм? Что-то нужно?"],
+        "hello": ["Привет! Я рядом.", "О, ты здесь. Как дела?", "Хей! Чем займёмся?"],
+        "wake": ["Ой, я задумалась… Ты что-то хотел?", "А? Я не сплю, честно!", "Хм-м… о чём это я."],
+    },
+    "cold": {
+        "pat": ["Руки.", "Это лишнее.", "…Допустим.", "Хватит."],
+        "poke": ["Что?", "Не тыкай.", "Слушаю.", "Говори по делу."],
+        "hello": ["Я здесь.", "Слушаю.", "Да?"],
+        "wake": ["Я не спала. Что нужно?", "Слушаю.", "Да, я тут."],
+    },
+    "quiet": {
+        "pat": ["М-м… приятно.", "Спасибо…", "Ммм… тепло так."],
+        "poke": ["А?.. Я тут.", "М? Что такое?", "Тише… я рядом."],
+        "hello": ["Привет… я рядом.", "Ты здесь… хорошо.", "Привет."],
+        "wake": ["М-м… задремала. Что-то нужно?", "А?.. Я слушаю.", "Я тут… просто задумалась."],
+    },
+    "lively": {
+        "pat": ["Ура, гладят! Ещё!", "Хи-хи, щекотно и приятно!", "Ещё-ещё-ещё!"],
+        "poke": ["Эй-эй! Я тут!", "Ой! Что случилось?!", "Да-да-да, слушаю!"],
+        "hello": ["Привет-привет! Чем займёмся?!", "О, ты тут! Ура!", "Приве-е-ет!"],
+        "wake": ["Я не сплю! Честно-честно!", "А? Что? Я готова!", "Ой! Задумалась — уже тут!"],
+    },
+}
+
+
+def reaction_set(p: dict | None = None) -> dict:
+    """Реплики на касания под характер."""
+    p = p if p is not None else _raw_profile()
+    if not p.get("configured"):
+        return REACTIONS["warm"]
+    t = p["traits"]
+    if _step(t["warmth"]) <= 1:
+        return REACTIONS["cold"]
+    if _step(t["energy"]) <= 1:
+        return REACTIONS["quiet"]
+    if _step(t["energy"]) >= 4 or _step(t["humor"]) >= 4:
+        return REACTIONS["lively"]
+    return REACTIONS["warm"]
+
+
 def character_lines(p: dict) -> list[str]:
     t = p["traits"]
     return [TRAIT_TEXT[k][_step(t[k])] for k in TRAITS]

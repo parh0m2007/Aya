@@ -35,17 +35,36 @@ def _own_is_latest() -> bool:
     return player.STATE.get("user_ts", 0.0) >= system._LAST.get("ts", 0.0)
 
 
-def control(action: str) -> dict:
-    """Команда своему плееру, если он играет. Если он на паузе — только когда
+def _own_targeted() -> bool:
+    """Команда — своему плееру? Да, если он играет. Если на паузе — только когда
     больше ничего не играет и последним управляли именно им (иначе «продолжи»
     после паузы YouTube включило бы волну Яндекса)."""
-    if player.active():
-        other = system.now_playing() if not player.playing() else None
-        if player.playing() or ((other or {}).get("status") != "playing" and _own_is_latest()):
-            cmd = {"toggle": "pause" if player.playing() else "play"}.get(action, action)
-            player.command(cmd)
-            return {**player.describe(), "ok": True}
+    if not player.active():
+        return False
+    if player.playing():
+        return True
+    return system.now_playing().get("status") != "playing" and _own_is_latest()
+
+
+def control(action: str) -> dict:
+    """Команда своему плееру или тому, что играет в Windows."""
+    if _own_targeted():
+        cmd = {"toggle": "pause" if player.playing() else "play"}.get(action, action)
+        player.command(cmd)
+        return {**player.describe(), "ok": True}
     return system.control(action)
+
+
+def volume(change: str = "", level: int | None = None) -> dict:
+    """Громкость именно музыки: своего плеера или программы, где она играет
+    (браузер, приложение), — не всего компьютера. change: up | down; level: 0–100."""
+    lv = None if level is None else max(0, min(100, int(level)))
+    if _own_targeted():
+        was = player.volume()
+        new = lv if lv is not None else player.step(change)
+        player.set_volume(new)
+        return {"ok": True, "level": new, "was": was, "app": "мой плеер", "via": "aya"}
+    return system.music_volume(change, None if lv is None else lv / 100)
 
 
 def duck(on: bool, reason: str = "speak") -> dict:
@@ -110,7 +129,21 @@ import re as _re
 
 _NAME = r"(?:(?:ая|аюшка|aya)[,!\s]+)?"
 _MUSIC = r"(?:музык\w*|песн\w*|трек\w*|плеер\w*|воспроизведени\w*)"
+_QUIETER = r"(?:по)?тише"
+_LOUDER = r"(?:по)?громче"
+_VOL_OF = rf"(?:(?:громкость|звук)\s+)?{_MUSIC}"
 _QUICK = (
+    ("volume_down", _re.compile(
+        rf"^{_NAME}(?:сделай\s+)?(?:{_VOL_OF}\s+{_QUIETER}|{_QUIETER}\s+{_VOL_OF})$"
+        rf"|^{_NAME}(?:убавь|уменьши|приглуши)\s+{_VOL_OF}$"
+    )),
+    ("volume_up", _re.compile(
+        rf"^{_NAME}(?:сделай\s+)?(?:{_VOL_OF}\s+{_LOUDER}|{_LOUDER}\s+{_VOL_OF})$"
+        rf"|^{_NAME}(?:прибавь|увеличь)\s+{_VOL_OF}$"
+    )),
+    ("volume", _re.compile(
+        rf"^{_NAME}(?:(?:сделай|поставь|установи)\s+)?громкость\s+{_MUSIC}\s+(?:на\s+)?(?P<level>\d{{1,3}})\s*(?:%|процент\w*)?$"
+    )),
     ("pause", _re.compile(rf"^{_NAME}(?:поставь\s+)?(?:на\s+)?пауз[ауы]?(?:\s+{_MUSIC})?$|^{_NAME}(?:останови|выключи|приостанови|заглуши)\s+{_MUSIC}$")),
     ("resume", _re.compile(rf"^{_NAME}(?:продолжи|включи\s+обратно|верни|сними\s+с\s+паузы)\s+{_MUSIC}$|^{_NAME}сними\s+с\s+паузы$")),
     ("next", _re.compile(rf"^{_NAME}(?:(?:включи\s+|поставь\s+)?следующ\w+\s+{_MUSIC}|переключи(?:\s+{_MUSIC})?|(?:другую|дальше)\s+{_MUSIC}|{_MUSIC}\s+дальше|пропусти(?:\s+{_MUSIC})?)$")),
@@ -127,8 +160,10 @@ def quick_intent(text: str) -> dict | None:
     if not t or len(t) > 60:
         return None
     for action, rx in _QUICK:
-        if rx.match(t):
-            return {"action": action}
+        m = rx.match(t)
+        if m:
+            level = m.groupdict().get("level")
+            return {"action": action, "level": int(level)} if level else {"action": action}
     return None
 
 
@@ -150,6 +185,20 @@ def _played_line(r: dict) -> str:
     return f"открыла в Яндекс Музыке в браузере: {what} — нажми ▶ (чтобы я включала сама, нужен токен в консоли)"
 
 
+def _volume_line(d: dict, change: str) -> str:
+    if not d.get("ok"):
+        if d.get("note") == "none":
+            return "сейчас музыка не играет — нечего делать тише или громче"
+        return "не получилось поменять громкость музыки"
+    where = "в моём плеере" if d.get("via") == "aya" else f"({d.get('app') or 'плеер'})"
+    line = f"громкость музыки {where}: {d['level']}%"
+    if change == "up" and d.get("was") == 100:
+        line += " — это уже максимум для музыки; громче можно только общей громкостью компьютера"
+    elif change == "down" and d.get("was") == 0:
+        line += " — музыка и так без звука"
+    return line
+
+
 def tool(args: dict) -> str:
     """music {action, query?, service?, what?} — для модели."""
     action = str(args.get("action") or ("play" if args.get("query") or args.get("what") else "now")).lower()
@@ -164,10 +213,24 @@ def tool(args: dict) -> str:
         return _played_line(r)
     if action in ("now", "status", "what"):
         return describe_line(now_playing())
+    steps = {"volume_up": "up", "louder": "up", "up": "up", "volume_down": "down", "quieter": "down", "down": "down"}
+    vol_change = steps.get(action)
+    if action in ("volume", "set_volume"):
+        vol_change = steps.get(str(args.get("change") or "").lower())  # {action: volume, change: down}
+    if vol_change or action in ("volume", "set_volume"):
+        level = None
+        if not vol_change:
+            m = _re.search(r"\d{1,3}", str(args.get("level") if args.get("level") is not None else ""))
+            if not m:
+                return "укажи level 0–100 или action volume_up / volume_down"
+            level = int(m.group())  # модель иногда пишет «30%»
+        d = volume(vol_change or "", level)
+        db.log_event("tool", f"music volume {vol_change or level}")
+        return _volume_line(d, vol_change or "")
     mapping = {"resume": "play", "continue": "play", "stop": "pause", "skip": "next", "back": "prev", "previous": "prev"}
     act = mapping.get(action, action)
     if act not in system.KEYS:
-        return "не поняла команду для музыки: play, pause, resume, next, prev, now"
+        return "не поняла команду для музыки: play, pause, resume, next, prev, now, volume_up, volume_down, volume"
     d = control(act)
     db.log_event("tool", f"music {act}")
     if d.get("note") == "game":

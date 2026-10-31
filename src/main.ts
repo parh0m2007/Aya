@@ -36,6 +36,7 @@ import { setTrayCheck, onTrayToggle, type TrayCheck } from "./tray";
 import { initWindowState, isAyaHidden } from "./window-state";
 import { clampScale } from "./avatar-logic";
 import { PcmChunker, nextStart, parsePcmType, pcmToWav } from "./pcm-stream";
+import { initMusicBar, type MusicBar } from "./music-bar";
 import { AyaMusic } from "./music-player";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -86,6 +87,7 @@ function openPanel(view: "chat" | "quick" = "chat") {
   dock.classList.add("hidden");
   hideBubble(true);
   panelOpen = true;
+  document.body.classList.add("panel-open"); // плеер внизу не перекрывает чат
   setPanelOpen(true);
   showView(view);
   if (!historyLoaded) void loadHistory();
@@ -96,6 +98,7 @@ function closePanel() {
   panel.classList.add("hidden");
   dock.classList.remove("hidden");
   panelOpen = false;
+  document.body.classList.remove("panel-open");
   turnSeq++;
   cancelFollowup(true);
   setPanelOpen(false);
@@ -532,12 +535,16 @@ async function speakOnce(text: string, mood: string): Promise<void> {
 /* ═════════════════════════ музыка ═════════════════════════ */
 
 // Яндекс Музыка по токену играет прямо здесь; YouTube — в браузере.
+// Пока она играет, внизу окна — плеер: пауза, треки, громкость.
+let musicBar: MusicBar | null = null;
 const ayaMusic = new AyaMusic({
   coreUrl: CORE_URL,
   onTrack: (line) => {
     if (!busy && !speakPlaying) showBubble(line, { holdMs: 3500 });
   },
+  onState: (snap) => musicBar?.render(snap),
 });
+musicBar = initMusicBar($("mbar"), (cmd) => ayaMusic.send(cmd));
 
 /* Пока Ая говорит или слушает — музыка тише (своя и в других приложениях).
    Следим за состоянием, а не ставим хуки в каждое место: между фразами речь

@@ -15,6 +15,7 @@ export interface MusicSnap {
   pos: number;
   count: number;
   current: MusicItem | null;
+  volume?: number; // громкость своего плеера 0–100 (ядро до 1.0.4 её не присылало)
 }
 
 export type MusicStep = "none" | "start" | "pause" | "resume" | "stop";
@@ -38,4 +39,39 @@ export function rampVolume(current: number, target: number, step = 0.08): number
 export function nowPlayingLine(it: MusicItem | null): string {
   if (!it) return "";
   return "♪ " + [it.artist, it.title].filter(Boolean).join(" — ");
+}
+
+function volumeOf(s: MusicSnap | null | undefined): number {
+  const v = Number(s?.volume);
+  return Number.isFinite(v) && s?.volume !== undefined ? Math.max(0, Math.min(100, Math.round(v))) : 100;
+}
+
+/** Громкость трека для <audio> (0–1) из состояния ядра. */
+export function playerGain(s: MusicSnap | null | undefined): number {
+  return volumeOf(s) / 100;
+}
+
+export interface BarView {
+  visible: boolean;
+  playing: boolean;
+  artist: string;
+  title: string;
+  volume: number;
+  canLouder: boolean;
+  canQuieter: boolean;
+}
+
+/** Плеер в окне Аи: показываем, пока свой плеер играет или стоит на паузе. */
+export function barView(s: MusicSnap | null | undefined): BarView {
+  const live = !!s && (s.status === "playing" || s.status === "paused") && !!s.current;
+  const volume = volumeOf(s);
+  return {
+    visible: live,
+    playing: live && s!.status === "playing",
+    artist: live ? s!.current!.artist || "" : "",
+    title: live ? s!.current!.title || "" : "",
+    volume,
+    canLouder: volume < 100,
+    canQuieter: volume > 0,
+  };
 }

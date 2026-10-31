@@ -317,3 +317,60 @@ def test_set_volume_reports_failure(monkeypatch, conftest_ws):
 
     monkeypatch.setattr(tools, "_speakers_volume", broken)
     assert "не получилось" in tools.run_action("set_volume", {"level": 40})
+
+
+# ── без чёрных окон консоли ───────────────────────────────────────────
+# Ядро работает через pythonw.exe (без консоли), и каждая консольная
+# программа, запущенная без CREATE_NO_WINDOW, открывала пустое чёрное окно.
+
+
+def _flags(kw: dict) -> int:
+    return int(kw.get("creationflags", 0))
+
+
+def test_run_cmd_powershell_without_window(monkeypatch, conftest_ws):
+    import subprocess
+
+    seen = []
+
+    class R:
+        returncode = 0
+        stdout = b"ok"
+        stderr = b""
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: seen.append(_flags(kw)) or R())
+    _enable("run_cmd")
+    assert "ok" in tools.run_action("run_cmd", {"command": "Write-Output ok"})
+    assert seen and seen[0] & tools.NO_WINDOW == tools.NO_WINDOW != 0
+
+
+def test_ssh_without_window(monkeypatch, conftest_ws, tmp_path):
+    import json
+    import shutil
+    import subprocess
+
+    home = tmp_path / "home"
+    (home / ".aya").mkdir(parents=True)
+    (home / ".aya" / "config.json").write_text(json.dumps({"ssh": {"hosts": {"prod": "user@example.invalid"}}}), "utf-8")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(home)))
+    monkeypatch.setattr(shutil, "which", lambda n: "C:\ssh.exe")
+    seen = []
+
+    class R:
+        returncode = 0
+        stdout = b"up"
+        stderr = b""
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: seen.append(_flags(kw)) or R())
+    _enable("ssh_run")
+    assert "up" in tools.run_action("ssh_run", {"host": "prod", "command": "uptime"})
+    assert seen and seen[0] & tools.NO_WINDOW == tools.NO_WINDOW
+
+
+def test_cmd_start_launch_without_window(monkeypatch, conftest_ws):
+    """«Открой Chrome» шло через cmd /c start — на миг мелькало чёрное окно."""
+    _enable("open_app")
+    calls = []
+    monkeypatch.setattr(tools.subprocess, "Popen", lambda cmd, **kw: calls.append((cmd, _flags(kw))))
+    tools.run_action("open_app", {"app_id": "chrome"})
+    assert calls[0][0][:3] == ["cmd", "/c", "start"] and calls[0][1] & tools.NO_WINDOW

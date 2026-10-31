@@ -430,26 +430,40 @@ def duck(on: bool, reason: str = "speak", on_timer=None) -> dict:
         return _duck_restore()
 
 
+def _session_key(s, i: int) -> str:
+    """Свой ключ для каждого звукового сеанса: у браузера их бывает несколько в одном процессе."""
+    try:
+        ident = s.InstanceIdentifier
+        if ident:
+            return str(ident)
+    except Exception:  # noqa: BLE001
+        pass
+    return f"{s.Process.pid}:{i}"
+
+
+def _save_ducked() -> None:
+    """Windows запоминает громкость программы: если ядро упадёт посреди речи,
+    музыка так и осталась бы тихой — записываем, к чему вернуть."""
+    saved = {name: level for _vol, level, name in _DUCK["volumes"].values()}
+    db.set_setting(_DUCK_SAVED, json.dumps(saved, ensure_ascii=False) if saved else "")
+
+
 def _duck_apply(mode: str) -> dict:
     if mode == "lower":
         level = duck_level()
-        saved = {}
-        for s in audio_sessions():
+        for i, s in enumerate(audio_sessions()):
             try:
                 name = s.Process.name()
                 if not is_music_proc(name):
                     continue
                 vol = s.SimpleAudioVolume
                 cur = vol.GetMasterVolume()
-                _DUCK["volumes"][s.Process.pid] = (vol, cur)
-                saved[name.lower()] = cur
+                _DUCK["volumes"][_session_key(s, i)] = (vol, cur, name.lower())
                 vol.SetMasterVolume(cur * level, None)
             except Exception:  # noqa: BLE001
                 continue
         if _DUCK["volumes"]:
-            # Windows запоминает громкость программы: если ядро упадёт посреди
-            # речи, музыка так и осталась бы тихой — запишем, что вернуть
-            db.set_setting(_DUCK_SAVED, json.dumps(saved, ensure_ascii=False))
+            _save_ducked()
             return {"ducked": True, "mode": "lower"}
         return {"ducked": False, "mode": "lower"}
     playing = _smtc_playing() or _browser_playing()
@@ -466,7 +480,7 @@ def _duck_apply(mode: str) -> dict:
 
 def _duck_restore() -> dict:
     restored = False
-    for vol, level in list(_DUCK["volumes"].values()):
+    for vol, level, _name in list(_DUCK["volumes"].values()):
         try:
             vol.SetMasterVolume(level, None)
             restored = True
@@ -519,3 +533,71 @@ def duck_watchdog() -> None:
         if _DUCK["reasons"] and time.time() - _DUCK["since"] > 90:
             _DUCK["reasons"].clear()
             _duck_restore()
+
+
+# ── громкость самой музыки ────────────────────────────────────────────
+
+VOL_STEP = 0.7  # «тише» — в 0,7 раза (≈ −3 дБ): на слух шаги одинаковые на любой громкости
+
+
+def step_volume(cur: float, change: str) -> float:
+    """Один шаг «тише»/«громче». Минус 10 процентов на 100% почти не слышно,
+    поэтому шаг — в разах."""
+    if change == "down":
+        new = cur * VOL_STEP
+        return 0.0 if new < 0.05 else round(new, 4)
+    if change == "up":
+        return min(1.0, round(max(cur / VOL_STEP, 0.1), 4))
+    return cur
+
+
+def _music_sessions() -> list:
+    """Где играет музыка: браузер, плеер. Ничего не играет — то, чем управляли последним."""
+    found = []
+    for s in audio_sessions():
+        try:
+            if is_music_proc(s.Process.name()):
+                found.append(s)
+        except Exception:  # noqa: BLE001
+            continue
+    if found or not _LAST["proc"] or time.time() - _LAST["ts"] > 6 * 3600:
+        return found
+    out = []
+    for s in audio_sessions(active_only=False):
+        try:
+            if s.Process.name().lower() == _LAST["proc"]:
+                out.append(s)
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def music_volume(change: str = "", level: float | None = None) -> dict:
+    """Громкость музыки — программы в микшере Windows (браузер с YouTube,
+    приложение Яндекс Музыки), а не всего компьютера. Пока Ая говорит и музыка
+    приглушена, меняем то, к чему громкость вернётся после речи."""
+    with _DUCK_LOCK:
+        found = _music_sessions()
+        if not found:
+            return {"ok": False, "note": "none"}
+        ducked_by = duck_level()
+        out = None
+        for i, s in enumerate(found):
+            try:
+                vol = s.SimpleAudioVolume
+                key = _session_key(s, i)
+                held = _DUCK["volumes"].get(key)
+                cur = held[1] if held else vol.GetMasterVolume()
+                new = max(0.0, min(1.0, float(level))) if level is not None else step_volume(cur, change)
+                if held:
+                    _DUCK["volumes"][key] = (held[0], new, held[2])
+                    vol.SetMasterVolume(new * ducked_by, None)
+                else:
+                    vol.SetMasterVolume(new, None)
+                if out is None:
+                    out = {"ok": True, "level": round(new * 100), "was": round(cur * 100), "app": friendly_app(s.Process.name()), "via": "mixer"}
+            except Exception:  # noqa: BLE001
+                continue
+        if _DUCK["volumes"]:
+            _save_ducked()
+        return out or {"ok": False, "note": "error"}
